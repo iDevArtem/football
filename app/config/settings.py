@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     mongo_db_name: str = "football_bot"
     default_timezone: str = "Europe/Kyiv"
     admin_telegram_ids: str = ""
+    webapp_url: str = "https://football.idev.wtf"
+    jwt_secret: str = "change-me-secret-key-32-chars-minimum-length!"
+    card_number: str = ""
+    card_recipient: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
