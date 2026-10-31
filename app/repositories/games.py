@@ -235,6 +235,14 @@ class GameRepository:
         )
         return await self.get(game_id)
 
+    get_by_id = get
+
+    async def list_active_games(self) -> list[dict]:
+        cursor = self.db.games.find(
+            {"status": {"$in": ACTIVE_STATUSES}}
+        ).sort("start_at", -1)
+        return [doc async for doc in cursor]
+
     async def games_to_open_friends(self) -> list[dict]:
         now = datetime.now(timezone.utc)
         cursor = self.db.games.find({
