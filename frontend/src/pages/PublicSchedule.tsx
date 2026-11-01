@@ -79,7 +79,7 @@ export function PublicSchedule({ onGoToCabinet }: { onGoToCabinet: (gameId?: str
               <ChevronRight className="w-4 h-4" />
             </button>
             <a
-              href="https://t.me/"
+              href="https://t.me/PlayGame_robot"
               target="_blank"
               rel="noreferrer"
               className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition flex items-center gap-2"

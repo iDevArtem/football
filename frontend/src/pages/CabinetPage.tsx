@@ -77,7 +77,7 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
         script.id = "telegram-login-script";
         script.src = "https://telegram.org/js/telegram-widget.js?22";
         script.async = true;
-        script.setAttribute("data-telegram-login", "football_idev_bot");
+        script.setAttribute("data-telegram-login", "PlayGame_robot");
         script.setAttribute("data-size", "large");
         script.setAttribute("data-radius", "12");
         script.setAttribute("data-onauth", "onTelegramAuth(user)");
@@ -119,13 +119,13 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
             </div>
 
             <a
-              href="https://t.me/football_idev_bot"
+              href="https://t.me/PlayGame_robot"
               target="_blank"
               rel="noreferrer"
               className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 hover:brightness-110 active:scale-95 transition"
             >
               <LogIn className="w-4 h-4" />
-              Открыть в Telegram (@football_idev_bot)
+              Открыть в Telegram (@PlayGame_robot)
             </a>
 
             <p className="text-[11px] text-slate-500 pt-2">
