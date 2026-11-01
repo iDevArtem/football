@@ -47,7 +47,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script_stop: true
           script: |
-            cd /home/idev/football_bot
+            cd /home/idev/football
             git pull
             docker build -t football-bot:local .
             docker stack deploy -c docker-compose.swarm.yml football
