@@ -37,8 +37,9 @@ async def lifespan(app: FastAPI):
     bot = None
     polling_task = None
     scheduler = None
+    dp = None
 
-    if settings.bot_token and settings.bot_token != "test_token":
+    if settings.bot_token and not settings.bot_token.startswith("test"):
         bot = Bot(token=settings.bot_token)
         set_bot(bot)
         dp = Dispatcher(storage=MemoryStorage())
@@ -49,29 +50,38 @@ async def lifespan(app: FastAPI):
         polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
         logger.info("Bot polling and scheduler started.")
 
-    yield
-
-    logger.info("Shutting down...")
-    if scheduler:
+    try:
+        yield
+    except asyncio.CancelledError:
+        logger.info("Lifespan received cancellation signal; initiating shutdown.")
+    finally:
+        logger.info("Shutting down...")
+        if scheduler:
+            try:
+                scheduler.shutdown(wait=False)
+            except Exception as e:
+                logger.warning(f"Error shutting down scheduler: {e}")
+        if dp:
+            try:
+                await dp.stop_polling()
+            except Exception as e:
+                logger.warning(f"Error stopping bot polling: {e}")
+        if polling_task:
+            polling_task.cancel()
+            try:
+                await polling_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if bot:
+            try:
+                await bot.session.close()
+            except Exception as e:
+                logger.warning(f"Error closing bot session: {e}")
         try:
-            scheduler.shutdown(wait=False)
-        except Exception:
-            pass
-    if dp:
-        try:
-            await dp.stop_polling()
-        except Exception:
-            pass
-    if polling_task:
-        polling_task.cancel()
-        try:
-            await polling_task
-        except (asyncio.CancelledError, Exception):
-            pass
-    if bot:
-        await bot.session.close()
-    await close_mongo()
-    logger.info("Shutdown complete.")
+            await close_mongo()
+        except Exception as e:
+            logger.warning(f"Error closing MongoDB: {e}")
+        logger.info("Shutdown complete.")
 
 
 app = FastAPI(
@@ -119,10 +129,10 @@ async def spa_fallback(request: Request, full_path: str):
     return HTMLResponse("<html><body><h1>Football Mini App</h1></body></html>")
 
 
-async def main() -> None:
+def main() -> None:
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

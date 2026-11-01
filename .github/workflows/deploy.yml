@@ -49,6 +49,9 @@ jobs:
           script: |
             cd /home/idev/football
             git pull
+            set -a
+            [ -f .env ] && . ./.env
+            set +a
             docker build -t football-bot:local .
             docker stack deploy -c docker-compose.swarm.yml football
             docker service update --force football_app

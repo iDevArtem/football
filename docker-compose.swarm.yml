@@ -7,14 +7,10 @@ services:
     env_file:
       - .env
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}
       - MONGO_URL=mongodb://mongo:27017
       - MONGO_DB_NAME=${MONGO_DB_NAME:-football_bot}
-      - ADMIN_TELEGRAM_IDS=${ADMIN_TELEGRAM_IDS}
-      - WEBAPP_URL=https://football.idev.wtf
-      - JWT_SECRET=${JWT_SECRET:-super-secret-key-change-me-in-production}
-      - CARD_NUMBER=${CARD_NUMBER:-}
-      - CARD_RECIPIENT=${CARD_RECIPIENT:-}
+      - WEBAPP_URL=${WEBAPP_URL:-https://football.idev.wtf}
+    stop_grace_period: 15s
     networks:
       - traefik-public
       - football-internal
