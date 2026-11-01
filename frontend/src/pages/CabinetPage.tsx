@@ -62,6 +62,31 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
     }
   }, [selectedGameId, loadGameDetail]);
 
+  // Telegram Login Widget setup for desktop browser
+  const widgetRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!user && widgetRef.current) {
+      (window as any).onTelegramAuth = (telegramUser: any) => {
+        loginWithWidget(telegramUser);
+      };
+
+      // Check if script already appended
+      if (!document.getElementById("telegram-login-script")) {
+        const script = document.createElement("script");
+        script.id = "telegram-login-script";
+        script.src = "https://telegram.org/js/telegram-widget.js?22";
+        script.async = true;
+        script.setAttribute("data-telegram-login", "football_idev_bot");
+        script.setAttribute("data-size", "large");
+        script.setAttribute("data-radius", "12");
+        script.setAttribute("data-onauth", "onTelegramAuth(user)");
+        script.setAttribute("data-request-access", "write");
+        widgetRef.current.appendChild(script);
+      }
+    }
+  }, [user, loginWithWidget]);
+
   if (authLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
@@ -84,19 +109,27 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
             Для записи на матчи, добавления друзей и отметки оплат авторизуйтесь через ваш Telegram-аккаунт.
           </p>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
+            <div className="flex justify-center py-2" ref={widgetRef} />
+
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-slate-800"></div>
+              <span className="flex-shrink mx-4 text-slate-500 text-[11px] uppercase">или</span>
+              <div className="flex-grow border-t border-slate-800"></div>
+            </div>
+
             <a
-              href="https://t.me/"
+              href="https://t.me/football_idev_bot"
               target="_blank"
               rel="noreferrer"
               className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 hover:brightness-110 active:scale-95 transition"
             >
               <LogIn className="w-4 h-4" />
-              Открыть Mini App в Telegram
+              Открыть в Telegram (@football_idev_bot)
             </a>
 
             <p className="text-[11px] text-slate-500 pt-2">
-              При открытии внутри Telegram Mini App вход происходит автоматически без паролей.
+              Внутри Telegram Mini App вход происходит мгновенно без подтверждений.
             </p>
           </div>
         </div>

@@ -150,8 +150,11 @@ async def join_game(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    if game.get("status") in {"cancelled", "closed"}:
-        raise HTTPException(status_code=400, detail="Game is closed or cancelled")
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
+        raise HTTPException(status_code=400, detail="Action not permitted in current game status")
+
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
+        raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
     tg_user = UserProxy(
         telegram_id=user["telegram_id"],
@@ -187,6 +190,9 @@ async def leave_game(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
+        raise HTTPException(status_code=400, detail="Action not permitted in current game status")
+
     tg_user = UserProxy(
         telegram_id=user["telegram_id"],
         first_name=user.get("first_name", ""),
@@ -220,6 +226,9 @@ async def add_friend(
     game = await game_repo.get_by_id(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
+
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
+        raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
     if not game.get("friends_allowed"):
         raise HTTPException(status_code=400, detail="Friends registration is not allowed yet")

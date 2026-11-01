@@ -140,3 +140,94 @@ async def test_admin_cancel_success(test_app, admin_token):
             res = await client.post(f"/api/admin/games/{game_id}/cancel", json={"reason": "Rain"}, headers=headers)
             assert res.status_code == 200
             assert res.json()["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_leave_game_and_status_guard(test_app, player_token):
+    game_id = "6724123456789abcdef01234"
+    # 1. Successful leave during registration_open
+    mock_game_open = {"_id": ObjectId(game_id), "status": "registration_open", "max_players": 15}
+    with patch("app.api.routers.games.get_db") as mock_get_db, \
+         patch("app.api.routers.games.GameRepository") as mock_repo_cls, \
+         patch("app.api.routers.games.ParticipantRepository") as mock_part_cls, \
+         patch("app.api.routers.games.update_game_message", new_callable=AsyncMock):
+        mock_get_db.return_value = MagicMock()
+        repo = MagicMock()
+        repo.get_by_id = AsyncMock(return_value=mock_game_open)
+        mock_repo_cls.return_value = repo
+
+        part = MagicMock()
+        part.decline_player = AsyncMock()
+        mock_part_cls.return_value = part
+
+        headers = {"Authorization": f"Bearer {player_token}"}
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as client:
+            res = await client.post(f"/api/games/{game_id}/leave", headers=headers)
+            assert res.status_code == 200
+            assert res.json()["status"] == "declined"
+            part.decline_player.assert_called_once()
+
+    # 2. Blocked leave during payment_collection
+    mock_game_pay = {"_id": ObjectId(game_id), "status": "payment_collection", "max_players": 15}
+    with patch("app.api.routers.games.get_db") as mock_get_db, \
+         patch("app.api.routers.games.GameRepository") as mock_repo_cls:
+        mock_get_db.return_value = MagicMock()
+        repo = MagicMock()
+        repo.get_by_id = AsyncMock(return_value=mock_game_pay)
+        mock_repo_cls.return_value = repo
+
+        headers = {"Authorization": f"Bearer {player_token}"}
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as client:
+            res = await client.post(f"/api/games/{game_id}/leave", headers=headers)
+            assert res.status_code == 400
+            assert "Action not permitted" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_friends_limits_enforced(test_app, player_token):
+    game_id = "6724123456789abcdef01234"
+    mock_game = {"_id": ObjectId(game_id), "status": "registration_open", "friends_allowed": True}
+    with patch("app.api.routers.games.get_db") as mock_get_db, \
+         patch("app.api.routers.games.GameRepository") as mock_repo_cls, \
+         patch("app.api.routers.games.ParticipantRepository") as mock_part_cls:
+        mock_get_db.return_value = MagicMock()
+        repo = MagicMock()
+        repo.get_by_id = AsyncMock(return_value=mock_game)
+        mock_repo_cls.return_value = repo
+
+        part = MagicMock()
+        # User already has 3 friends
+        part.count_friends_by_user = AsyncMock(return_value=3)
+        mock_part_cls.return_value = part
+
+        headers = {"Authorization": f"Bearer {player_token}"}
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as client:
+            res = await client.post(f"/api/games/{game_id}/friends", json={"friend_name": "Friend 4"}, headers=headers)
+            assert res.status_code == 400
+            assert "Maximum 3 friends" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_admin_participant_status_reorder(test_app, admin_token):
+    game_id = "6724123456789abcdef01234"
+    part_id = "6724123456789abcdef01235"
+    mock_part = {"_id": ObjectId(part_id), "game_id": ObjectId(game_id), "status": "reserve"}
+
+    with patch("app.api.routers.admin.get_db") as mock_get_db, \
+         patch("app.api.routers.admin.ParticipantRepository") as mock_part_cls, \
+         patch("app.api.routers.admin.update_game_message", new_callable=AsyncMock):
+        mock_get_db.return_value = MagicMock()
+        part_repo = MagicMock()
+        part_repo.get = AsyncMock(return_value=mock_part)
+        part_repo.move_to_confirmed = AsyncMock()
+        mock_part_cls.return_value = part_repo
+
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as client:
+            res = await client.patch(
+                f"/api/admin/games/{game_id}/participants/{part_id}",
+                json={"status": "confirmed"},
+                headers=headers,
+            )
+            assert res.status_code == 200
+            part_repo.move_to_confirmed.assert_called_once_with(game_id, part_id)

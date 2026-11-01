@@ -244,13 +244,18 @@ async def update_participant_status(
     if req.status:
         if req.status not in {"confirmed", "reserve", "removed"}:
             raise HTTPException(status_code=400, detail="Invalid status")
-        await db.participants.update_one(
-            {"_id": ObjectId(participant_id)},
-            {"$set": {"status": req.status, "updated_at": datetime.now(timezone.utc)}}
-        )
-        game = await db.games.find_one({"_id": ObjectId(game_id)})
-        if game:
-            await part_repo.normalize_roster(game_id, game.get("max_players", 15))
+        if req.status == "confirmed":
+            await part_repo.move_to_confirmed(game_id, participant_id)
+        elif req.status == "reserve":
+            await part_repo.move_to_reserve(game_id, participant_id)
+        elif req.status == "removed":
+            await db.participants.update_one(
+                {"_id": ObjectId(participant_id)},
+                {"$set": {"status": "removed", "updated_at": datetime.now(timezone.utc)}}
+            )
+            game = await db.games.find_one({"_id": ObjectId(game_id)})
+            if game:
+                await part_repo.normalize_roster(game_id, game.get("max_players", 15))
 
     if req.payment_status:
         await pay_repo.mark_by_participant_id(

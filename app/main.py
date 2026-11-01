@@ -98,8 +98,9 @@ async def spa_fallback(request: Request, full_path: str):
     if full_path.startswith("api/"):
         return HTMLResponse(status_code=404, content="API endpoint not found")
 
-    target_file = STATIC_DIR / full_path
-    if full_path and target_file.is_file():
+    resolved_static = STATIC_DIR.resolve()
+    target_file = (STATIC_DIR / full_path).resolve()
+    if full_path and target_file.is_file() and target_file.is_relative_to(resolved_static):
         return FileResponse(target_file)
 
     index_html = STATIC_DIR / "index.html"

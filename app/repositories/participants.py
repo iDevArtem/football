@@ -148,6 +148,28 @@ class ParticipantRepository:
                     {"$set": {"status": new_status, "updated_at": now}},
                 )
 
+    async def move_to_confirmed(self, game_id: str, participant_id: str) -> None:
+        """Перемещает игрока в основу, присваивая приоритетную позицию и нормализуя состав."""
+        await self.db.participants.update_one(
+            {"_id": ObjectId(participant_id), "game_id": ObjectId(game_id)},
+            {"$set": {"position": 0, "status": "confirmed", "updated_at": datetime.now(timezone.utc)}}
+        )
+        game = await self.db.games.find_one({"_id": ObjectId(game_id)})
+        if game:
+            await self.normalize_roster(game_id, game.get("max_players", 15))
+
+    async def move_to_reserve(self, game_id: str, participant_id: str) -> None:
+        """Перемещает игрока в резерв, присваивая позицию в конец очереди."""
+        last = await self.db.participants.find_one({"game_id": ObjectId(game_id)}, sort=[("position", -1)])
+        new_pos = (int(last["position"]) + 1) if last else 999
+        await self.db.participants.update_one(
+            {"_id": ObjectId(participant_id), "game_id": ObjectId(game_id)},
+            {"$set": {"position": new_pos, "status": "reserve", "updated_at": datetime.now(timezone.utc)}}
+        )
+        game = await self.db.games.find_one({"_id": ObjectId(game_id)})
+        if game:
+            await self.normalize_roster(game_id, game.get("max_players", 15))
+
     async def promote_from_reserve(self, game_id: str) -> dict | None:
         game = await self.db.games.find_one({"_id": ObjectId(game_id)})
         if not game:
