@@ -27,6 +27,8 @@ jobs:
           pip install pytest pytest-asyncio httpx
 
       - name: Run Pytest
+        env:
+          BOT_TOKEN: "test_bot_token"
         run: |
           pytest tests/
 
