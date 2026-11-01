@@ -5,8 +5,6 @@ services:
     restart: unless-stopped
     volumes:
       - mongodb_data:/data/db
-    ports:
-      - "27017:27017"
 
   bot_app:
     build: .
