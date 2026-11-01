@@ -45,14 +45,23 @@ async def lifespan(app: FastAPI):
         dp.include_router(bot_router)
 
         scheduler = setup_scheduler(bot)
-        polling_task = asyncio.create_task(dp.start_polling(bot))
+        # handle_signals=False allows Uvicorn to handle SIGINT/SIGTERM and trigger clean lifespan exit
+        polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
         logger.info("Bot polling and scheduler started.")
 
     yield
 
     logger.info("Shutting down...")
     if scheduler:
-        scheduler.shutdown(wait=False)
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            pass
+    if dp:
+        try:
+            await dp.stop_polling()
+        except Exception:
+            pass
     if polling_task:
         polling_task.cancel()
         try:
