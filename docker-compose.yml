@@ -8,12 +8,17 @@ services:
     ports:
       - "27017:27017"
 
-  bot:
+  bot_app:
     build: .
-    container_name: football_bot
+    container_name: football_bot_app
     restart: unless-stopped
     env_file:
       - .env
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URL=mongodb://mongodb:27017
+      - MONGO_DB_NAME=football_bot
     depends_on:
       - mongodb
 
