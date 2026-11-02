@@ -74,6 +74,7 @@ class StartPaymentRequest(BaseModel):
     duration_minutes: int = 90
     card_number: Optional[str] = None
     card_recipient: Optional[str] = None
+    excluded_participant_ids: Optional[list[str]] = None
 
 
 class AddGuestRequest(BaseModel):
@@ -258,8 +259,20 @@ async def start_payment(
     hourly_rate = game.get("hourly_rate", 600)
     total_cost = int((minutes / 60) * hourly_rate)
 
+    part_repo = ParticipantRepository(db)
     confirmed_count = await part_repo.count_confirmed(game_id)
-    per_player = math.ceil(total_cost / confirmed_count) if confirmed_count > 0 else 0
+    if req.excluded_participant_ids:
+        confirmed_participants = await part_repo.list_by_game(game_id)
+        confirmed_participants = [p for p in confirmed_participants if p.get("status") == "confirmed"]
+        excluded_set = set(str(pid) for pid in req.excluded_participant_ids)
+        playing_count = len([p for p in confirmed_participants if str(p["_id"]) not in excluded_set])
+        if playing_count <= 0:
+            playing_count = confirmed_count
+    else:
+        excluded_set = set()
+        playing_count = confirmed_count
+
+    per_player = math.ceil(total_cost / playing_count) if playing_count > 0 else 0
 
     card_number = (req.card_number or "").strip()
     card_recipient = (req.card_recipient or "").strip()
@@ -285,7 +298,10 @@ async def start_payment(
             "updated_at": datetime.now(timezone.utc),
         }}
     )
-    await pay_repo.ensure_for_game(game_id, per_player)
+    if excluded_set:
+        await pay_repo.ensure_for_game(game_id, per_player, excluded_participant_ids=excluded_set)
+    else:
+        await pay_repo.ensure_for_game(game_id, per_player)
     updated = await game_repo.get(game_id)
     bot = get_bot()
     if bot:

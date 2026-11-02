@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # Поэтому для приватного ввода друга держим короткое pending-состояние по user_id.
 PENDING_FRIEND_INPUTS: dict[int, dict] = {}
 PENDING_CARD_INPUTS: dict[int, dict] = {}
+PENDING_ROSTER_VERIFICATIONS: dict[int, dict] = {}
 # Когда пользователь нажал кнопку в группе, но бот еще не может писать ему в личку,
 # сохраняем намерение и продолжаем после /start в личке.
 PENDING_PRIVATE_ACTIONS: dict[int, dict] = {}
@@ -648,6 +649,7 @@ async def execute_start_payments(
     recipient: str,
     edit_message_fn=None,
     callback=None,
+    excluded_participant_ids: set[str] | None = None,
 ) -> None:
     db = get_db()
     game_repo = GameRepository(db)
@@ -657,9 +659,19 @@ async def execute_start_payments(
     hourly_rate = game.get("hourly_rate", 600)
     total_cost = int((minutes / 60) * hourly_rate)
     participants_repo = ParticipantRepository(db)
-    confirmed_count = await participants_repo.count_confirmed(game_id)
+    if excluded_participant_ids:
+        confirmed_participants = await participants_repo.list_by_game(game_id)
+        confirmed_participants = [p for p in confirmed_participants if p.get("status") == "confirmed"]
+        excluded_set = set(str(pid) for pid in excluded_participant_ids)
+        playing_count = len([p for p in confirmed_participants if str(p["_id"]) not in excluded_set])
+        if playing_count <= 0:
+            playing_count = await participants_repo.count_confirmed(game_id)
+    else:
+        excluded_set = set()
+        playing_count = await participants_repo.count_confirmed(game_id)
+
     import math
-    per_player = math.ceil(total_cost / confirmed_count) if confirmed_count > 0 else 0
+    per_player = math.ceil(total_cost / playing_count) if playing_count > 0 else 0
 
     from bson import ObjectId
     await db.games.update_one(
@@ -680,7 +692,10 @@ async def execute_start_payments(
     await settings_repo.set_default_payment_details(card_number, recipient)
 
     pay_repo = PaymentRepository(db)
-    await pay_repo.ensure_for_game(game_id, per_player)
+    if excluded_set:
+        await pay_repo.ensure_for_game(game_id, per_player, excluded_participant_ids=excluded_set)
+    else:
+        await pay_repo.ensure_for_game(game_id, per_player)
     fresh = await game_repo.get(game_id)
     await update_game_message(bot, fresh)
     try:
@@ -697,11 +712,12 @@ async def execute_start_payments(
     if recipient.strip():
         card_info += f" ({recipient.strip()})"
 
+    excluded_str = f" (не играли: {len(excluded_set)})" if excluded_set else ""
     msg_text = (
         f"✅ Сбор оплат начат!\n\n"
         f"Длительность: <b>{duration_hours} ч</b> ({minutes} мин)\n"
         f"Аренда поля: <b>{total_cost} грн</b>\n"
-        f"Игроков в основе: <b>{confirmed_count}</b>\n"
+        f"Игроков играло: <b>{playing_count}</b>{excluded_str}\n"
         f"С каждого игрока: <b>{per_player} грн</b>"
         f"{card_info}\n\n"
         f"Карточки игры во всех группах обновлены."
@@ -900,9 +916,43 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     if action == "confirm_payments":
-        hourly_rate = game.get("hourly_rate", 600)
+        from app.bot.keyboards import verify_roster_keyboard
+        from bson import ObjectId
+        confirmed_cursor = db.participants.find({"game_id": ObjectId(game_id), "status": "confirmed"}).sort("position", 1)
+        confirmed = [p async for p in confirmed_cursor]
+        if not confirmed:
+            await callback.answer("В основе нет игроков для сбора оплат", show_alert=True)
+            return
+
+        existing_data = PENDING_ROSTER_VERIFICATIONS.get(callback.from_user.id)
+        if not existing_data or existing_data.get("game_id") != game_id:
+            PENDING_ROSTER_VERIFICATIONS[callback.from_user.id] = {"game_id": game_id, "excluded_ids": set()}
+
+        excluded_ids = PENDING_ROSTER_VERIFICATIONS[callback.from_user.id]["excluded_ids"]
         await edit_admin_message(
-            "⏱ <b>Сколько времени играли?</b>\n\nСтоимость аренды поля будет поделена поровну между игроками основы.",
+            "👥 <b>Проверка состава перед расчетом</b>\n\n"
+            "Отметьте тех, кто <b>не играл</b> (нажмите на игрока, чтобы исключить).\n"
+            "Сумма аренды поля будет поделена поровну только между отмеченными ✅.",
+            verify_roster_keyboard(game_id, confirmed, excluded_ids),
+        )
+        await callback.answer()
+        return
+
+    if action == "pay_dur_menu":
+        from bson import ObjectId
+        total_confirmed = await db.participants.count_documents({"game_id": ObjectId(game_id), "status": "confirmed"})
+        excluded_ids = PENDING_ROSTER_VERIFICATIONS.get(callback.from_user.id, {}).get("excluded_ids", set())
+        playing_count = total_confirmed - len(excluded_ids)
+        if playing_count <= 0:
+            await callback.answer("Все игроки исключены! Отметьте хотя бы одного игравшего.", show_alert=True)
+            return
+
+        hourly_rate = game.get("hourly_rate", 600)
+        excluded_note = f" (не играли: {len(excluded_ids)})" if excluded_ids else ""
+        await edit_admin_message(
+            f"⏱ <b>Сколько времени играли?</b>\n\n"
+            f"Состав: <b>{playing_count} чел</b>{excluded_note}\n"
+            f"Стоимость аренды поля будет поделена поровну между игравшими.",
             payment_duration_keyboard(game_id, hourly_rate),
         )
         await callback.answer()
@@ -929,6 +979,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         minutes = int(action.split(":", 1)[1])
         settings_repo = SettingsRepository(db)
         card_details = await settings_repo.get_default_payment_details()
+        excluded_ids = PENDING_ROSTER_VERIFICATIONS.get(callback.from_user.id, {}).get("excluded_ids", set())
         await execute_start_payments(
             callback.bot,
             game_id,
@@ -937,17 +988,21 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             card_details.get("recipient", ""),
             edit_message_fn=edit_admin_message,
             callback=callback,
+            excluded_participant_ids=excluded_ids,
         )
+        PENDING_ROSTER_VERIFICATIONS.pop(callback.from_user.id, None)
         return
 
     if action.startswith("card_edit:"):
         minutes = int(action.split(":", 1)[1])
+        excluded_ids = PENDING_ROSTER_VERIFICATIONS.get(callback.from_user.id, {}).get("excluded_ids", set())
         PENDING_CARD_INPUTS[callback.from_user.id] = {
             "game_id": game_id,
             "duration": minutes,
+            "excluded_ids": list(excluded_ids),
         }
         await state.set_state(AdminCardState.waiting_card)
-        await state.update_data(game_id=game_id, duration=minutes)
+        await state.update_data(game_id=game_id, duration=minutes, excluded_ids=list(excluded_ids))
         await edit_admin_message(
             "💳 Введите номер карты и имя получателя одним сообщением:\n\n<i>Например: 4441 1111 2222 3333 Иван И.</i>",
             None,
@@ -1323,6 +1378,8 @@ async def admin_card_input(message: Message, state: FSMContext) -> None:
 
     await state.clear()
     PENDING_CARD_INPUTS.pop(message.from_user.id, None)
+    excluded_ids = set(data.get("excluded_ids") or [])
+    PENDING_ROSTER_VERIFICATIONS.pop(message.from_user.id, None)
 
     async def _send_summary(msg_text, markup):
         await message.answer(msg_text, reply_markup=markup)
@@ -1334,7 +1391,47 @@ async def admin_card_input(message: Message, state: FSMContext) -> None:
         card_number,
         recipient,
         edit_message_fn=_send_summary,
+        excluded_participant_ids=excluded_ids,
     )
+
+
+@router.callback_query(F.data.startswith("vr:"))
+async def toggle_roster_verification(callback: CallbackQuery) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Только админ", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer("Некорректные данные", show_alert=True)
+        return
+    _, game_id, participant_id = parts
+    db = get_db()
+    from bson import ObjectId
+
+    data = PENDING_ROSTER_VERIFICATIONS.get(callback.from_user.id)
+    if not data or data.get("game_id") != game_id:
+        PENDING_ROSTER_VERIFICATIONS[callback.from_user.id] = {"game_id": game_id, "excluded_ids": set()}
+        data = PENDING_ROSTER_VERIFICATIONS[callback.from_user.id]
+
+    if participant_id in data["excluded_ids"]:
+        data["excluded_ids"].remove(participant_id)
+    else:
+        data["excluded_ids"].add(participant_id)
+
+    confirmed_cursor = db.participants.find({"game_id": ObjectId(game_id), "status": "confirmed"}).sort("position", 1)
+    confirmed = [p async for p in confirmed_cursor]
+
+    from app.bot.keyboards import verify_roster_keyboard
+    text = (
+        "👥 <b>Проверка состава перед расчетом</b>\n\n"
+        "Отметьте тех, кто <b>не играл</b> (нажмите на игрока, чтобы исключить).\n"
+        "Сумма аренды поля будет поделена поровну только между отмеченными ✅."
+    )
+    try:
+        await callback.message.edit_text(text, reply_markup=verify_roster_keyboard(game_id, confirmed, data["excluded_ids"]))
+    except Exception:
+        pass
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("pay:"))

@@ -69,7 +69,7 @@ def card_confirmation_keyboard(game_id: str, duration_minutes: int) -> InlineKey
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Оставить эту карту", callback_data=f"admin:{game_id}:card_keep:{duration_minutes}")],
         [InlineKeyboardButton(text="✏️ Изменить карту", callback_data=f"admin:{game_id}:card_edit:{duration_minutes}")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:{game_id}:confirm_payments")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:{game_id}:pay_dur_menu")],
     ])
 
 
@@ -113,8 +113,35 @@ def payment_duration_keyboard(game_id: str, hourly_rate: int = 600) -> InlineKey
             InlineKeyboardButton(text=f"⏱ 1.5 часа ({cost_90} грн)", callback_data=f"admin:{game_id}:paydur:90"),
             InlineKeyboardButton(text=f"⏱ 2.0 часа ({cost_120} грн)", callback_data=f"admin:{game_id}:paydur:120"),
         ],
-        [InlineKeyboardButton(text="Назад", callback_data=f"admin:{game_id}:settings")],
+        [InlineKeyboardButton(text="Назад", callback_data=f"admin:{game_id}:confirm_payments")],
     ])
+
+
+def verify_roster_keyboard(game_id: str, confirmed: list[dict], excluded_ids: set[str] | None = None) -> InlineKeyboardMarkup:
+    excluded = excluded_ids or set()
+    rows = []
+    for participant in confirmed:
+        p_id = str(participant["_id"])
+        name = participant.get("display_name", "Игрок")
+        mark = "👥 " if participant.get("type") == "friend" else ""
+        if p_id in excluded:
+            btn_text = f"🚫 {mark}{name} (не играл)"
+        else:
+            btn_text = f"✅ {mark}{name}"
+        rows.append([
+            InlineKeyboardButton(text=btn_text, callback_data=f"vr:{game_id}:{p_id}")
+        ])
+    playing_count = len(confirmed) - len(excluded)
+    rows.append([
+        InlineKeyboardButton(
+            text=f"➡️ К расчету ({playing_count} чел)",
+            callback_data=f"admin:{game_id}:pay_dur_menu",
+        )
+    ])
+    rows.append([
+        InlineKeyboardButton(text="⬅️ Назад в меню", callback_data=f"admin:{game_id}:settings")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def friends_cancel_keyboard(game_id: str, friends: list[dict]) -> InlineKeyboardMarkup:

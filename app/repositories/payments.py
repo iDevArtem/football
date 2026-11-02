@@ -6,23 +6,54 @@ class PaymentRepository:
     def __init__(self, db):
         self.db = db
 
-    async def ensure_for_game(self, game_id: str, amount: int) -> None:
+    async def ensure_for_game(self, game_id: str, amount: int, excluded_participant_ids: set[str] | list[str] | None = None) -> None:
+        excluded = set(str(pid) for pid in (excluded_participant_ids or []))
         cursor = self.db.participants.find({"game_id": ObjectId(game_id), "status": "confirmed"})
+        now = datetime.now(timezone.utc)
         async for participant in cursor:
-            await self.db.payments.update_one(
-                {"game_id": ObjectId(game_id), "participant_id": participant["_id"]},
-                {"$setOnInsert": {
-                    "game_id": ObjectId(game_id),
-                    "participant_id": participant["_id"],
+            pid = participant["_id"]
+            is_excluded = str(pid) in excluded
+            existing = await self.db.payments.find_one({"game_id": ObjectId(game_id), "participant_id": pid})
+            if is_excluded:
+                await self.db.payments.update_one(
+                    {"game_id": ObjectId(game_id), "participant_id": pid},
+                    {
+                        "$set": {
+                            "amount": 0,
+                            "status": "not_played",
+                            "confirmed_by_admin": True,
+                            "updated_at": now,
+                        },
+                        "$setOnInsert": {
+                            "game_id": ObjectId(game_id),
+                            "participant_id": pid,
+                            "confirmed_by_user": False,
+                            "created_at": now,
+                        },
+                    },
+                    upsert=True,
+                )
+            else:
+                set_fields = {
                     "amount": amount,
-                    "status": "pending",
-                    "confirmed_by_user": False,
-                    "confirmed_by_admin": False,
-                    "created_at": datetime.now(timezone.utc),
-                    "updated_at": datetime.now(timezone.utc),
-                }},
-                upsert=True,
-            )
+                    "updated_at": now,
+                }
+                if not existing or existing.get("status") != "paid":
+                    set_fields["status"] = "pending"
+                    set_fields["confirmed_by_admin"] = False
+                await self.db.payments.update_one(
+                    {"game_id": ObjectId(game_id), "participant_id": pid},
+                    {
+                        "$set": set_fields,
+                        "$setOnInsert": {
+                            "game_id": ObjectId(game_id),
+                            "participant_id": pid,
+                            "confirmed_by_user": False,
+                            "created_at": now,
+                        },
+                    },
+                    upsert=True,
+                )
 
     async def mark_paid_by_user(self, game_id: str, telegram_id: int) -> bool:
         participant = await self.db.participants.find_one({
