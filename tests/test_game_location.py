@@ -128,7 +128,10 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
             },
         }
         text = format_game_message(game, [])
-        self.assertIn("📍 Место: <a href=\"https://maps.google.com/?q=50.4501,30.5234\"><b>Стадион Чемпион</b></a> (ул. Спортивная, 5)", text)
+        self.assertIn("📍 <b>Стадион Чемпион</b>", text)
+        self.assertIn("📮 ул. Спортивная, 5", text)
+        self.assertIn("<blockquote>", text)
+        self.assertIn("<blockquote expandable>", text)
 
     def test_render_game_message_without_location(self):
         game = {
@@ -141,7 +144,8 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
             "duration_minutes": 90,
         }
         text = format_game_message(game, [])
-        self.assertNotIn("📍 Место:", text)
+        self.assertNotIn("🗺 <b>Локация и навигация:</b>", text)
+        self.assertIn("<blockquote expandable>", text)
 
     def test_admin_keyboard_has_location_button(self):
         kb = admin_game_keyboard("64a8b79f2e3d4c5b6a7b8c9d", friends_allowed=False, status="registration_open")
@@ -296,7 +300,4 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
             call_kwargs = message.answer.call_args[1]
             self.assertIn("link_preview_options", call_kwargs)
             preview_opt = call_kwargs["link_preview_options"]
-            self.assertFalse(preview_opt.is_disabled)
-            self.assertTrue(preview_opt.prefer_small_media)
-            self.assertFalse(preview_opt.prefer_large_media)
-            self.assertEqual(preview_opt.url, "https://maps.google.com/?q=50.45,30.52")
+            self.assertTrue(preview_opt.is_disabled)

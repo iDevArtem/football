@@ -79,16 +79,6 @@ def can_add_friends_now(game: dict) -> bool:
 
 
 def get_game_link_preview_options(game: dict) -> LinkPreviewOptions:
-    loc = game.get("location")
-    if loc and loc.get("latitude") is not None and loc.get("longitude") is not None:
-        map_url = f"https://maps.google.com/?q={loc['latitude']},{loc['longitude']}"
-        return LinkPreviewOptions(
-            is_disabled=False,
-            url=map_url,
-            prefer_small_media=True,
-            prefer_large_media=False,
-            show_above_text=False,
-        )
     return LinkPreviewOptions(is_disabled=True)
 
 

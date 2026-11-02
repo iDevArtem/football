@@ -24,7 +24,23 @@ def _format_dt(value) -> str:
     return value.strftime("%d.%m.%Y %H:%M")
 
 
-def dynamic_format_text(confirmed_count: int, max_players: int = 15) -> str:
+def dynamic_format_text(confirmed_count: int, max_players: int = 15, clean: bool = False) -> str:
+    if clean:
+        if max_players == 15:
+            if confirmed_count < 10:
+                return "⏳ Сбор состава"
+            if confirmed_count == 10:
+                return "⚽ 2 команды 5х5"
+            if confirmed_count in (11, 12):
+                return "⚽ 2 команды 5х5 с заменами"
+            if confirmed_count in (13, 14):
+                return "⚽ 3 команды с ротацией"
+            if confirmed_count >= 15:
+                return "🔥 3 команды 5х5"
+        if confirmed_count < max_players:
+            return f"⏳ Сбор состава {confirmed_count}/{max_players}"
+        return "🔥 Состав набран"
+
     if max_players == 15:
         if confirmed_count < 10:
             return "⏳ Сбор состава (нужно от 10 чел для 5х5)"
@@ -64,19 +80,10 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
     lines = [
         f"{prefix}<b>{escape(game['title'])}</b>",
         "",
-        f"Статус: <b>{escape(status_text(status))}</b>",
+        f"📌 Статус: <b>{escape(status_text(status))}</b>",
     ]
-    loc = game.get("location")
-    if loc and (loc.get("title") or loc.get("address")):
-        title_part = escape(loc.get("title", ""))
-        addr_part = f" ({escape(loc.get('address', ''))})" if loc.get("address") else ""
-        if loc.get("latitude") is not None and loc.get("longitude") is not None:
-            map_url = f"https://maps.google.com/?q={loc['latitude']},{loc['longitude']}"
-            lines.append(f"📍 Место: <a href=\"{map_url}\"><b>{title_part}</b></a>{addr_part}")
-        else:
-            lines.append(f"📍 Место: <b>{title_part}</b>{addr_part}")
     if status == "cancelled" and game.get("cancel_reason"):
-        lines.append(f"Причина: <b>{escape(game['cancel_reason'])}</b>")
+        lines.append(f"⚠️ Причина: <b>{escape(game['cancel_reason'])}</b>")
 
     max_players = game.get("max_players", 15)
     hourly_rate = game.get("hourly_rate", 600)
@@ -85,23 +92,42 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
     if duration_hours.is_integer():
         duration_hours = int(duration_hours)
 
+    clean_format = dynamic_format_text(len(confirmed), max_players, clean=True)
+
     lines += [
-        f"Дата: <b>{date_text}</b>",
-        f"Время: <b>{time_text}</b>",
-        f"Длительность: <b>{duration_min} мин ({duration_hours} ч)</b>",
-        f"Формат: <b>{dynamic_format_text(len(confirmed), max_players)}</b>",
+        f"📅 Дата: <b>{date_text}</b>",
+        f"⏰ Время: <b>{time_text}</b>",
+        f"⏱ Длительность: <b>{duration_min} мин</b>",
+        f"🎮 Формат: <b>{clean_format}</b>",
     ]
 
     if status == "payment_collection":
         total_cost = game.get("total_cost") or int((duration_min / 60) * hourly_rate)
         price_per_player = game.get("price", 0)
-        lines.append(f"💳 Аренда поля: <b>{total_cost} грн ({duration_hours} ч)</b> — по <b>{price_per_player} грн</b> с игрока")
+        lines.append(f"💳 Аренда поля: <b>{total_cost} грн</b> — по <b>{price_per_player} грн</b> с игрока")
     else:
-        lines.append(f"💰 Аренда поля: <b>{hourly_rate} грн/час</b> (делится на всех пришедших)")
+        lines.append(f"💰 Аренда поля: <b>{hourly_rate} грн/час</b>")
+
+    # RichBlockMap между описанием и составом
+    loc = game.get("location")
+    if loc and (loc.get("title") or loc.get("latitude") is not None):
+        title_str = escape(loc.get("title") or "Футбольное поле")
+        addr_str = escape(loc.get("address") or "")
+        has_coords = loc.get("latitude") is not None and loc.get("longitude") is not None
+        map_url = f"https://maps.google.com/?q={loc['latitude']},{loc['longitude']}" if has_coords else None
+
+        lines.append("")
+        lines.append("🗺 <b>Локация и навигация:</b>")
+        quote_parts = [f"📍 <b>{title_str}</b>"]
+        if addr_str:
+            quote_parts.append(f"📮 {addr_str}")
+        if map_url:
+            quote_parts.append(f"🚗 <a href=\"{map_url}\">Открыть на карте (Google Maps)</a>")
+        lines.append(f"<blockquote>{chr(10).join(quote_parts)}</blockquote>")
 
     lines += [
         "",
-        f"✅ Основной состав: <b>{len(confirmed)} / {max_players}</b>",
+        f"👥 Основной состав: <b>{len(confirmed)} / {max_players}</b>",
         f"🟡 Резерв: <b>{len(reserve)}</b>",
         "",
     ]
@@ -170,6 +196,19 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
         lines.append("Игра отменена. Кнопки записи отключены.")
     elif status == "registration_closed":
         lines.append("Запись закрыта админом.")
+
+    # details summary (Telegram expandable blockquote в самом низу)
+    full_dynamic = dynamic_format_text(len(confirmed), max_players, clean=False)
+    summary_lines = [
+        "ℹ️ <b>Информация об игре и боте:</b>",
+        f"• Формат: {full_dynamic}",
+        f"• 💰 Аренда поля: {hourly_rate} грн/час (делится на всех пришедших)",
+        f"• ⏱ Длительность: {duration_min} мин ({duration_hours} ч)",
+        "• 🔄 Резерв: автоматический переход в основу при отказе участника",
+        "• 🤖 Бот: автоматическая запись, очереди и расчет оплат",
+    ]
+    lines.append("")
+    lines.append(f"<blockquote expandable>{chr(10).join(summary_lines)}</blockquote>")
 
     return "\n".join(lines).strip()
 
