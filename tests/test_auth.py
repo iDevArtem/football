@@ -73,3 +73,15 @@ def test_jwt_lifecycle():
     payload = decode_access_token(token, secret=JWT_SECRET)
     assert payload["sub"] == "123"
     assert payload["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_auth_config_endpoint():
+    from httpx import AsyncClient, ASGITransport
+    from app.main import app
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.get("/api/auth/config")
+        assert res.status_code == 200
+        data = res.json()
+        assert "bot_username" in data
+        assert "webapp_url" in data

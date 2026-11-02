@@ -38,8 +38,21 @@ class ParticipantRepository:
         return await self.db.participants.find_one({"_id": ObjectId(participant_id)})
 
     async def next_position(self, game_id: str) -> int:
+        from pymongo import ReturnDocument
+        game = await self.db.games.find_one_and_update(
+            {"_id": ObjectId(game_id)},
+            {"$inc": {"last_position": 1}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if game and "last_position" in game:
+            return int(game["last_position"])
         last = await self.db.participants.find_one({"game_id": ObjectId(game_id)}, sort=[("position", -1)])
-        return int(last["position"]) + 1 if last else 1
+        pos = int(last["position"]) + 1 if last else 1
+        await self.db.games.update_one(
+            {"_id": ObjectId(game_id)},
+            {"$set": {"last_position": pos}},
+        )
+        return pos
 
     async def join_player(self, game: dict, tg_user) -> dict:
         game_id = str(game["_id"])

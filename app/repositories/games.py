@@ -38,6 +38,7 @@ class GameRepository:
             "total_cost": None,
             "duration_minutes": duration_minutes,
             "friends_open_after_hours": friends_open_after_hours,
+            "last_position": 0,
             "status": "registration_open",
             "friends_allowed": False,
             "friends_allowed_after": friends_after,

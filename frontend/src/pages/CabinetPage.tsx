@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useTelegram } from "../hooks/useTelegram";
+import { useAppConfig } from "../hooks/useAppConfig";
 import { apiRequest } from "../api/client";
 import { RosterList, Participant } from "../components/RosterList";
 import { FriendsModal } from "../components/FriendsModal";
@@ -16,6 +17,7 @@ interface CabinetPageProps {
 export function CabinetPage({ initialGameId }: CabinetPageProps) {
   const { user, loading: authLoading, isAdmin, loginWithWidget } = useAuth();
   const { hapticImpact, hapticNotification } = useTelegram();
+  const { bot_username } = useAppConfig();
 
   const [games, setGames] = useState<any[]>([]);
   const [selectedGameId, setSelectedGameId] = useState<string | null>(initialGameId || null);
@@ -77,7 +79,7 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
         script.id = "telegram-login-script";
         script.src = "https://telegram.org/js/telegram-widget.js?22";
         script.async = true;
-        script.setAttribute("data-telegram-login", "PlayGame_robot");
+        script.setAttribute("data-telegram-login", bot_username);
         script.setAttribute("data-size", "large");
         script.setAttribute("data-radius", "12");
         script.setAttribute("data-onauth", "onTelegramAuth(user)");
@@ -85,7 +87,7 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
         widgetRef.current.appendChild(script);
       }
     }
-  }, [user, loginWithWidget]);
+  }, [user, loginWithWidget, bot_username]);
 
   if (authLoading) {
     return (
@@ -119,13 +121,13 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
             </div>
 
             <a
-              href="https://t.me/PlayGame_robot"
+              href={`https://t.me/${bot_username}`}
               target="_blank"
               rel="noreferrer"
               className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 hover:brightness-110 active:scale-95 transition"
             >
               <LogIn className="w-4 h-4" />
-              Открыть в Telegram (@PlayGame_robot)
+              Открыть в Telegram (@{bot_username})
             </a>
 
             <p className="text-[11px] text-slate-500 pt-2">

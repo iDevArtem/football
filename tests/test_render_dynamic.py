@@ -47,6 +47,12 @@ class TestRenderDynamic(unittest.TestCase):
         self.assertIn("3 команды 5х5 (15 чел — полный сбор!)", text_15)
         self.assertNotIn("Друзья", text_15)
 
+    def test_dynamic_format_custom_max_players(self):
+        from app.services.render import dynamic_format_text
+        self.assertEqual(dynamic_format_text(4, max_players=10), "⏳ Сбор состава (4/10)")
+        self.assertEqual(dynamic_format_text(10, max_players=10), "🔥 Состав набран (10 чел — сбор закрыт)")
+        self.assertEqual(dynamic_format_text(12, max_players=10), "🔥 Состав набран (10 чел, резерв 2)")
+
 
 if __name__ == "__main__":
     unittest.main()

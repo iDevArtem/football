@@ -231,3 +231,37 @@ async def test_admin_participant_status_reorder(test_app, admin_token):
             )
             assert res.status_code == 200
             part_repo.move_to_confirmed.assert_called_once_with(game_id, part_id)
+
+
+@pytest.mark.asyncio
+async def test_admin_edit_max_players_triggers_normalization(test_app, admin_token):
+    game_id = "6724123456789abcdef01234"
+    mock_game = {"_id": ObjectId(game_id), "max_players": 15, "status": "registration_open"}
+
+    with patch("app.api.routers.admin.get_db") as mock_get_db, \
+         patch("app.api.routers.admin.GameRepository") as mock_game_cls, \
+         patch("app.api.routers.admin.ParticipantRepository") as mock_part_cls, \
+         patch("app.api.routers.admin.trigger_sync"):
+        mock_db = MagicMock()
+        mock_db.games.update_one = AsyncMock()
+        mock_get_db.return_value = mock_db
+
+        game_repo = MagicMock()
+        game_repo.get_by_id = AsyncMock(return_value=mock_game)
+        mock_game_cls.return_value = game_repo
+
+        part_repo = MagicMock()
+        part_repo.normalize_roster = AsyncMock()
+        mock_part_cls.return_value = part_repo
+
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as client:
+            res = await client.patch(
+                f"/api/admin/games/{game_id}",
+                json={"max_players": 10},
+                headers=headers,
+            )
+            assert res.status_code == 200
+            assert res.json()["status"] == "updated"
+            part_repo.normalize_roster.assert_called_once_with(game_id, 10)
+

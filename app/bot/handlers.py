@@ -1,9 +1,10 @@
+import logging
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, ChatMemberUpdated
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from datetime import datetime, timezone
 
 from app.config.settings import get_settings
@@ -27,6 +28,7 @@ from app.services.render import format_game_message, format_payments_message
 from app.utils.dates import parse_date_time
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 # FSM в aiogram по умолчанию привязан к паре user+chat.
 # Когда кнопку нажимают в группе, а имя друга вводят в личке, state может не совпасть.
@@ -84,6 +86,13 @@ async def _update_single_message(bot, game_repo, chat_repo, game_id: str, chat_i
     except TelegramForbiddenError:
         await game_repo.remove_linked_message(game_id, chat_id, message_id)
         await chat_repo.set_active_status(chat_id, False)
+    except TelegramRetryAfter as e:
+        logger.warning(
+            "Telegram flood limit for chat %s (message %s): retry after %s seconds",
+            chat_id,
+            message_id,
+            getattr(e, "retry_after", None),
+        )
 
 
 async def update_game_message(bot, game: dict) -> None:

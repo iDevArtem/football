@@ -1,7 +1,10 @@
 import asyncio
+import logging
 from app.bot.bot_instance import get_bot
 from app.db.mongo import get_db
 from app.repositories.games import GameRepository
+
+logger = logging.getLogger(__name__)
 
 
 async def sync_game_message(game_id: str) -> None:
@@ -14,8 +17,8 @@ async def sync_game_message(game_id: str) -> None:
         game = await GameRepository(db).get(game_id)
         if game:
             await update_game_message(bot, game)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.exception("Failed to sync game message for %s: %s", game_id, e)
 
 
 def trigger_sync(game_id: str) -> None:

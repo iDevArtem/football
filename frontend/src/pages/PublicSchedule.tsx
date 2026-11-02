@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { Calendar, Clock, MapPin, Users, MessageCircle, ExternalLink, ChevronRight } from "lucide-react";
 import { apiRequest } from "../api/client";
+import { useAppConfig } from "../hooks/useAppConfig";
 import { RosterList } from "../components/RosterList";
 
 interface GameSummary {
@@ -21,6 +22,7 @@ interface GameSummary {
 }
 
 export function PublicSchedule({ onGoToCabinet }: { onGoToCabinet: (gameId?: string) => void }) {
+  const { bot_username } = useAppConfig();
   const [games, setGames] = useState<GameSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeGameDetail, setActiveGameDetail] = useState<any | null>(null);
@@ -79,7 +81,7 @@ export function PublicSchedule({ onGoToCabinet }: { onGoToCabinet: (gameId?: str
               <ChevronRight className="w-4 h-4" />
             </button>
             <a
-              href="https://t.me/PlayGame_robot"
+              href={`https://t.me/${bot_username}`}
               target="_blank"
               rel="noreferrer"
               className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition flex items-center gap-2"

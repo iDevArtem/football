@@ -24,17 +24,24 @@ def _format_dt(value) -> str:
 
 
 def dynamic_format_text(confirmed_count: int, max_players: int = 15) -> str:
-    if confirmed_count < 10:
-        return "⏳ Сбор состава (нужно от 10 чел для 5х5)"
-    if confirmed_count == 10:
-        return "⚽ 2 команды 5х5 (10 чел)"
-    if confirmed_count in (11, 12):
-        return f"⚽ 2 команды 5х5 (+{confirmed_count - 10} на замену)"
-    if confirmed_count in (13, 14):
-        return f"⚽ 3 команды ({confirmed_count} чел, с ротацией/заменами)"
-    if confirmed_count == 15:
-        return "🔥 3 команды 5х5 (15 чел — полный сбор!)"
-    return f"🔥 3 команды 5х5 (основа 15, резерв {confirmed_count - 15})"
+    if max_players == 15:
+        if confirmed_count < 10:
+            return "⏳ Сбор состава (нужно от 10 чел для 5х5)"
+        if confirmed_count == 10:
+            return "⚽ 2 команды 5х5 (10 чел)"
+        if confirmed_count in (11, 12):
+            return f"⚽ 2 команды 5х5 (+{confirmed_count - 10} на замену)"
+        if confirmed_count in (13, 14):
+            return f"⚽ 3 команды ({confirmed_count} чел, с ротацией/заменами)"
+        if confirmed_count == 15:
+            return "🔥 3 команды 5х5 (15 чел — полный сбор!)"
+        return f"🔥 3 команды 5х5 (основа 15, резерв {confirmed_count - 15})"
+
+    if confirmed_count < max_players:
+        return f"⏳ Сбор состава ({confirmed_count}/{max_players})"
+    if confirmed_count == max_players:
+        return f"🔥 Состав набран ({max_players} чел — сбор закрыт)"
+    return f"🔥 Состав набран ({max_players} чел, резерв {confirmed_count - max_players})"
 
 
 def format_game_message(game: dict, participants: list[dict], payments: list[dict] | None = None) -> str:

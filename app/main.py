@@ -90,14 +90,29 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for local frontend dev
+# CORS middleware for WebApp and local frontend dev
+_settings = get_settings()
+_cors_origins = [
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+]
+if _settings.webapp_url:
+    _cors_origins.append(_settings.webapp_url.rstrip("/"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "app": "football_bot"}
 
 # API Routers
 app.include_router(auth_router, prefix="/api/auth")

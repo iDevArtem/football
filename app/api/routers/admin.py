@@ -120,6 +120,9 @@ async def edit_game(
     if update_fields:
         update_fields["updated_at"] = datetime.now(timezone.utc)
         await db.games.update_one({"_id": ObjectId(game_id)}, {"$set": update_fields})
+        if req.max_players is not None:
+            part_repo = ParticipantRepository(db)
+            await part_repo.normalize_roster(game_id, req.max_players)
         trigger_sync(game_id)
 
     return {"status": "updated"}

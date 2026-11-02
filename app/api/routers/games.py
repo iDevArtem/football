@@ -153,9 +153,6 @@ async def join_game(
     if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
-    if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
-        raise HTTPException(status_code=400, detail="Action not permitted in current game status")
-
     tg_user = UserProxy(
         telegram_id=user["telegram_id"],
         first_name=user.get("first_name", ""),

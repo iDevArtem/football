@@ -110,3 +110,11 @@ async def login_widget(
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)):
     return user
+
+
+@router.get("/config")
+async def get_public_config(settings: Settings = Depends(get_settings)):
+    return {
+        "bot_username": settings.bot_username,
+        "webapp_url": settings.webapp_url,
+    }
