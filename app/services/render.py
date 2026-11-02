@@ -15,6 +15,7 @@ def status_text(status: str) -> str:
         "cancelled": "игра отменена",
         "closed": "закрыта",
         "full": "состав набран",
+        "finished": "игра завершена 🏁",
     }.get(status, status)
 
 
@@ -67,7 +68,7 @@ def format_game_header(game: dict, confirmed_count: int) -> str:
     date_text = start_at.strftime("%d.%m.%Y")
     time_text = start_at.strftime("%H:%M")
 
-    prefix = "❌ " if status == "cancelled" else "⚽ "
+    prefix = "❌ " if status == "cancelled" else ("🏁 " if status == "finished" else "⚽ ")
     lines = [
         f"{prefix}<b>{escape(game['title'])}</b>",
         "",
@@ -198,8 +199,28 @@ def format_game_roster(game: dict, participants: list[dict], payments: list[dict
         lines.append("Игра отменена. Кнопки записи отключены.")
     elif status == "registration_closed":
         lines.append("Запись закрыта админом.")
+    elif status == "finished":
+        if game.get("finish_note"):
+            lines.append(f"🏁 <b>Итоги матча:</b>\n{escape(str(game['finish_note']).strip())}")
+        else:
+            lines.append("🏁 Игра завершена.")
 
     return "\n".join(lines).strip()
+
+
+def format_game_caption(game: dict, participants: list[dict], payments: list[dict] | None = None, max_length: int = 1024) -> str:
+    full = format_game_message(game, participants, payments)
+    if len(full) <= max_length:
+        return full
+
+    # For finished games or long rosters, compact the reserve/declined
+    confirmed = [p for p in participants if p.get("status") == "confirmed"]
+    compact_text = format_game_message(game, confirmed, payments)
+    if len(compact_text) <= max_length:
+        return compact_text
+
+    # If still exceeds max_length, slice cleanly
+    return compact_text[:max_length - 3] + "..."
 
 
 def format_game_message(game: dict, participants: list[dict], payments: list[dict] | None = None) -> str:

@@ -111,13 +111,13 @@ class GameRepository:
 
     async def get_manageable_for_chat(self, chat_id: int) -> dict | None:
         return await self.db.games.find_one(
-            {"messages.chat_id": chat_id, "status": {"$in": ACTIVE_STATUSES + ["cancelled"]}},
+            {"messages.chat_id": chat_id, "status": {"$in": ACTIVE_STATUSES + ["cancelled", "finished"]}},
             sort=[("created_at", -1)],
         )
 
     async def get_latest_manageable(self) -> dict | None:
         return await self.db.games.find_one(
-            {"status": {"$in": ACTIVE_STATUSES + ["cancelled"]}},
+            {"status": {"$in": ACTIVE_STATUSES + ["cancelled", "finished"]}},
             sort=[("created_at", -1)],
         )
 
@@ -189,6 +189,28 @@ class GameRepository:
             }},
         )
 
+    async def finish_game(
+        self,
+        game_id: str,
+        finish_note: str | None = None,
+        media_type: str | None = None,
+        media_file_id: str | None = None,
+    ) -> None:
+        update_data = {
+            "status": "finished",
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if finish_note is not None:
+            update_data["finish_note"] = finish_note
+        if media_type is not None:
+            update_data["media_type"] = media_type
+        if media_file_id is not None:
+            update_data["media_file_id"] = media_file_id
+        await self.db.games.update_one(
+            {"_id": ObjectId(game_id)},
+            {"$set": update_data},
+        )
+
     async def open_registration(self, game_id: str) -> None:
         game = await self.get(game_id)
         if not game or game.get("status") in {"payment_collection", "closed"}:
@@ -199,6 +221,9 @@ class GameRepository:
             {"$set": {
                 "status": status,
                 "cancel_reason": None,
+                "finish_note": None,
+                "media_type": None,
+                "media_file_id": None,
                 "closed_at": None,
                 "updated_at": datetime.now(timezone.utc),
             }},

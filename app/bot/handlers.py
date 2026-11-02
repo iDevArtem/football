@@ -1,3 +1,4 @@
+import html
 import logging
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -25,6 +26,8 @@ from app.bot.keyboards import (
     broadcast_groups_keyboard,
     payment_duration_keyboard,
     card_confirmation_keyboard,
+    admin_cancel_edit_keyboard,
+    admin_finish_game_keyboard,
 )
 from app.services.render import format_game_message, format_payments_message
 from app.services.rich_message import send_game_message, edit_game_message
@@ -56,6 +59,10 @@ class AdminCardState(StatesGroup):
 class AdminEditState(StatesGroup):
     waiting_value = State()
     waiting_location = State()
+
+
+class AdminFinishGameState(StatesGroup):
+    waiting_content = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -199,8 +206,10 @@ async def get_active_game_or_reply(message: Message) -> dict | None:
 
 async def delete_message_safely(message: Message) -> None:
     try:
-        await message.delete()
-    except TelegramBadRequest:
+        res = message.delete()
+        if hasattr(res, "__await__"):
+            await res
+    except (TelegramBadRequest, Exception):
         pass
 
 
@@ -861,7 +870,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             await send_private_message(callback.bot, callback.from_user.id, text, reply_markup=markup)
             return
         try:
-            await callback.message.edit_text(text, reply_markup=markup)
+            await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
         except TelegramBadRequest:
             try:
                 await callback.message.edit_reply_markup(reply_markup=markup)
@@ -887,6 +896,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
 
     if action == "settings":
+        await state.clear()
         await show_or_refresh_admin_message(force_new=False)
         await callback.answer()
         return
@@ -991,22 +1001,22 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             "<i>Или просто координаты:</i>\n"
             "<code>50.4501, 30.5234</code>"
         )
-        await edit_admin_message(prompt, admin_game_keyboard(game_id, friends_allowed=game.get("friends_allowed", False), status=game.get("status")))
+        await edit_admin_message(prompt, admin_cancel_edit_keyboard(game_id))
         await callback.answer()
         return
 
     if action in {"edit_date", "edit_price", "edit_teams", "edit_players", "edit_duration", "edit_friends_hours"}:
         prompts = {
-            "edit_date": "📅 Введите новую дату и время:\n<code>2026-11-06 19:00</code>",
-            "edit_price": "💰 Введите новую цену числом:\n<code>250</code>",
-            "edit_teams": "👥 Введите количество команд:\n<code>3</code>",
-            "edit_players": "🏃 Введите игроков в команде:\n<code>6</code>",
-            "edit_duration": "⏱ Введите новую длительность игры в минутах (например, 90 или 120):",
-            "edit_friends_hours": "👥 Введите через сколько часов открывать друзей (например, 6):",
+            "edit_date": "📅 <b>Изменение даты и времени</b>\n\nВведите новую дату и время в формате:\n<code>2026-11-06 19:00</code>",
+            "edit_price": "💰 <b>Изменение цены</b>\n\nВведите новую цену числом:\n<code>250</code>",
+            "edit_teams": "👥 <b>Изменение команд</b>\n\nВведите количество команд:\n<code>3</code>",
+            "edit_players": "🏃 <b>Изменение игроков</b>\n\nВведите количество игроков в команде:\n<code>6</code>",
+            "edit_duration": "⏱ <b>Изменение длительности</b>\n\nВведите новую длительность игры в минутах (например, 90 или 120):",
+            "edit_friends_hours": "👥 <b>Таймер друзей</b>\n\nВведите через сколько часов открывать друзей (например, 6):",
         }
         await state.set_state(AdminEditState.waiting_value)
         await state.update_data(game_id=game_id, edit_action=action, admin_message_id=callback.message.message_id)
-        await edit_admin_message(prompts[action], admin_game_keyboard(game_id, friends_allowed=game.get("friends_allowed", False), status=game.get("status")))
+        await edit_admin_message(prompts[action], admin_cancel_edit_keyboard(game_id))
         await callback.answer()
         return
 
@@ -1206,6 +1216,36 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await update_game_message(callback.bot, game)
         await show_or_refresh_admin_message()
         await callback.answer("Игра отменена")
+        return
+
+    if action == "finish_game":
+        await state.set_state(AdminFinishGameState.waiting_content)
+        await state.update_data(game_id=game_id, admin_message_id=callback.message.message_id)
+        text = (
+            "🏁 <b>Завершение игры</b>\n\n"
+            "Отправьте <b>фото</b>, <b>видео</b> или <b>текстовый отчет</b> (счёт, яркие моменты, комментарий).\n"
+            "Медиа и текст прикрепятся прямо к карточке матча во всех группах.\n\n"
+            "<i>Или выберите действие ниже:</i>"
+        )
+        await edit_admin_message(text, admin_finish_game_keyboard(game_id))
+        await callback.answer()
+        return
+
+    if action == "do_finish_nocomment":
+        await state.clear()
+        await game_repo.finish_game(game_id)
+        game = await game_repo.get(game_id)
+        await update_game_message(callback.bot, game)
+        try:
+            from app.api.sync import trigger_sync
+            trigger_sync(game_id)
+        except Exception:
+            pass
+        await edit_admin_message(
+            "🏁 <b>Игра успешно завершена!</b>\n\nКарточки игры во всех группах обновлены.",
+            admin_game_keyboard(game_id, friends_allowed=game.get("friends_allowed", False), status="finished"),
+        )
+        await callback.answer("Игра завершена 🏁")
         return
 
     await callback.answer("Неизвестное действие", show_alert=True)
@@ -1426,7 +1466,10 @@ async def admin_edit_value(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     game_id = data.get("game_id")
     edit_action = data.get("edit_action")
+    admin_message_id = data.get("admin_message_id")
     raw = (message.text or "").strip()
+
+    await delete_message_safely(message)
 
     db = get_db()
     game_repo = GameRepository(db)
@@ -1444,7 +1487,20 @@ async def admin_edit_value(message: Message, state: FSMContext) -> None:
                 raise ValueError
             start_at = parse_date_time(parts[0], parts[1], get_settings().default_timezone)
             if start_at < now_tz(get_settings().default_timezone):
-                await message.answer("❌ Нельзя перенести игру в прошлое. Попробуй еще раз.")
+                past_msg = "❌ <b>Нельзя перенести игру в прошлое.</b>\n\nПопробуйте ещё раз:"
+                if admin_message_id:
+                    try:
+                        await message.bot.edit_message_text(
+                            chat_id=message.chat.id,
+                            message_id=admin_message_id,
+                            text=past_msg,
+                            reply_markup=admin_cancel_edit_keyboard(game_id),
+                            parse_mode="HTML",
+                        )
+                        return
+                    except TelegramBadRequest:
+                        pass
+                await message.answer(past_msg, reply_markup=admin_cancel_edit_keyboard(game_id), parse_mode="HTML")
                 return
             await game_repo.update_start_at(game_id, start_at)
             ok_text = "✅ Дата и время изменены."
@@ -1483,25 +1539,64 @@ async def admin_edit_value(message: Message, state: FSMContext) -> None:
         else:
             raise ValueError
     except Exception:
-        await message.answer("❌ Некорректное значение. Попробуй еще раз.")
+        err_msg = f"❌ <b>Некорректное значение:</b> <code>{html.escape(raw)}</code>\n\nПопробуйте ещё раз:"
+        if admin_message_id:
+            try:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=admin_message_id,
+                    text=err_msg,
+                    reply_markup=admin_cancel_edit_keyboard(game_id),
+                    parse_mode="HTML",
+                )
+                return
+            except TelegramBadRequest:
+                pass
+        await message.answer(err_msg, reply_markup=admin_cancel_edit_keyboard(game_id), parse_mode="HTML")
         return
 
     await state.clear()
     game = await game_repo.get(game_id)
     await update_game_message(message.bot, game)
+    try:
+        from app.api.sync import trigger_sync
+        trigger_sync(game_id)
+    except Exception:
+        pass
+
+    success_text = (
+        f"⚙️ <b>Управление игрой</b>\n\n"
+        f"{ok_text}\n\n"
+        "Все действия выполняются здесь, а в карточке игры и группах данные обновляются автоматически."
+    )
+    markup = admin_game_keyboard(
+        game_id,
+        friends_allowed=game.get("friends_allowed", False),
+        status=game.get("status"),
+    )
+    if admin_message_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=admin_message_id,
+                text=success_text,
+                reply_markup=markup,
+                parse_mode="HTML",
+            )
+            return
+        except TelegramBadRequest:
+            pass
     await message.answer(
-        ok_text,
-        reply_markup=admin_game_keyboard(
-            game_id,
-            friends_allowed=game.get("friends_allowed", False),
-            status=game.get("status"),
-        ),
+        success_text,
+        reply_markup=markup,
+        parse_mode="HTML",
     )
 
 
 async def _apply_location_update(message: Message, state: FSMContext, loc: dict) -> None:
     data = await state.get_data()
     game_id = data.get("game_id")
+    admin_message_id = data.get("admin_message_id")
     if not game_id:
         await state.clear()
         return
@@ -1517,23 +1612,109 @@ async def _apply_location_update(message: Message, state: FSMContext, loc: dict)
         latitude=loc["latitude"],
         longitude=loc["longitude"],
     )
+    await delete_message_safely(message)
     await state.clear()
 
     game = await game_repo.get(game_id)
     await update_game_message(message.bot, game)
     title_str = loc.get("title") or "Футбольное поле"
     addr_str = f" ({loc['address']})" if loc.get("address") else ""
-    await message.answer(
+    success_text = (
+        f"⚙️ <b>Управление игрой</b>\n\n"
         f"✅ Локация сохранена и установлена по умолчанию:\n"
         f"📍 <b>{title_str}</b>{addr_str}\n"
-        f"Координаты: <code>{loc['latitude']}, {loc['longitude']}</code>",
-        reply_markup=admin_game_keyboard(
-            game_id,
-            friends_allowed=game.get("friends_allowed", False),
-            status=game.get("status"),
-        ),
+        f"Координаты: <code>{loc['latitude']}, {loc['longitude']}</code>\n\n"
+        "Все действия выполняются здесь, а в карточке игры и группах данные обновляются автоматически."
+    )
+    markup = admin_game_keyboard(
+        game_id,
+        friends_allowed=game.get("friends_allowed", False),
+        status=game.get("status"),
+    )
+    if admin_message_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=admin_message_id,
+                text=success_text,
+                reply_markup=markup,
+                parse_mode="HTML",
+            )
+            return
+        except TelegramBadRequest:
+            pass
+    await message.answer(
+        success_text,
+        reply_markup=markup,
         parse_mode="HTML",
     )
+
+
+@router.message(AdminFinishGameState.waiting_content)
+async def admin_finish_game_content(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    game_id = data.get("game_id")
+    admin_message_id = data.get("admin_message_id")
+
+    db = get_db()
+    game_repo = GameRepository(db)
+    game = await game_repo.get(game_id)
+    if not game:
+        await delete_message_safely(message)
+        await state.clear()
+        return
+
+    media_type = None
+    media_file_id = None
+    finish_note = None
+
+    if message.photo:
+        media_type = "photo"
+        media_file_id = message.photo[-1].file_id
+        finish_note = (message.caption or "").strip() or None
+    elif message.video:
+        media_type = "video"
+        media_file_id = message.video.file_id
+        finish_note = (message.caption or "").strip() or None
+    elif message.text:
+        finish_note = message.text.strip() or None
+
+    await delete_message_safely(message)
+    await state.clear()
+
+    await game_repo.finish_game(
+        game_id,
+        finish_note=finish_note,
+        media_type=media_type,
+        media_file_id=media_file_id,
+    )
+    game = await game_repo.get(game_id)
+    await update_game_message(message.bot, game)
+    try:
+        from app.api.sync import trigger_sync
+        trigger_sync(game_id)
+    except Exception:
+        pass
+
+    success_text = "🏁 <b>Игра успешно завершена!</b>\n\nКарточки игры во всех группах обновлены."
+    markup = admin_game_keyboard(game_id, friends_allowed=game.get("friends_allowed", False), status="finished")
+    if admin_message_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=admin_message_id,
+                text=success_text,
+                reply_markup=markup,
+                parse_mode="HTML",
+            )
+            return
+        except TelegramBadRequest:
+            pass
+    await message.answer(success_text, reply_markup=markup, parse_mode="HTML")
 
 
 @router.message(AdminEditState.waiting_location, F.venue)
@@ -1659,7 +1840,11 @@ async def toggle_roster_verification(callback: CallbackQuery) -> None:
         "Сумма аренды поля будет поделена поровну только между отмеченными ✅."
     )
     try:
-        await callback.message.edit_text(text, reply_markup=verify_roster_keyboard(game_id, confirmed, data["excluded_ids"]))
+        await callback.message.edit_text(
+            text,
+            reply_markup=verify_roster_keyboard(game_id, confirmed, data["excluded_ids"]),
+            parse_mode="HTML",
+        )
     except Exception:
         pass
     await callback.answer()

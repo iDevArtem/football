@@ -4,10 +4,17 @@ from typing import Any, Optional, Union
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.methods.base import TelegramMethod
-from aiogram.types import InlineKeyboardMarkup, LinkPreviewOptions, Message
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    InputMediaVideo,
+    LinkPreviewOptions,
+    Message,
+)
 from pydantic import BaseModel
 
 from app.services.render import (
+    format_game_caption,
     format_game_message,
     format_game_rich_blocks,
     format_game_rich_html,
@@ -114,7 +121,30 @@ async def edit_game_message(
     reply_markup: InlineKeyboardMarkup | None = None,
     link_preview_options: LinkPreviewOptions | None = None,
 ) -> Message | bool:
-    """Редактирует карточку игры через стандартный edit_message_text без оверхеда."""
+    """Редактирует карточку игры через стандартный edit_message_text или edit_message_media, если прикреплено фото/видео."""
+    media_file_id = game.get("media_file_id")
+    if media_file_id:
+        caption = format_game_caption(game, participants, payments, max_length=1024)
+        media_type = game.get("media_type", "photo")
+        MediaClass = InputMediaVideo if media_type == "video" else InputMediaPhoto
+        media_obj = MediaClass(media=media_file_id, caption=caption, parse_mode="HTML")
+        try:
+            res = bot.edit_message_media(
+                chat_id=chat_id,
+                message_id=message_id,
+                media=media_obj,
+                reply_markup=reply_markup,
+            )
+            if hasattr(res, "__await__"):
+                return await res
+            return res
+        except TelegramBadRequest as e:
+            err_text = str(e).lower()
+            if "not modified" in err_text:
+                return True
+            # Fallback to text editing if media replacement is rejected
+            pass
+
     text = format_game_message(game, participants, payments)
     try:
         res = bot.edit_message_text(

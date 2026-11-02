@@ -17,7 +17,7 @@ def game_keyboard(
         rows.append([
             InlineKeyboardButton(text="👥 Оплата друзей", callback_data=f"pay:{game_id}:friends"),
         ])
-    elif status not in {"cancelled", "registration_closed", "closed", "game_started"}:
+    elif status not in {"cancelled", "registration_closed", "closed", "game_started", "finished"}:
         rows.append([
             InlineKeyboardButton(text="✅ Буду", callback_data=f"game:{game_id}:join"),
             InlineKeyboardButton(text="❌ Не буду", callback_data=f"game:{game_id}:decline"),
@@ -34,7 +34,7 @@ def game_keyboard(
 
 
 def admin_game_keyboard(game_id: str, *, friends_allowed: bool, status: str) -> InlineKeyboardMarkup:
-    if status == "cancelled":
+    if status in {"cancelled", "finished"}:
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="↩️ Вернуть игру", callback_data=f"admin:{game_id}:confirm_restore")],
         ])
@@ -68,10 +68,26 @@ def admin_game_keyboard(game_id: str, *, friends_allowed: bool, status: str) -> 
         rows.append([InlineKeyboardButton(text=close_text, callback_data=f"admin:{game_id}:{close_action}")])
         rows.append([InlineKeyboardButton(text="▶️ Начать игру", callback_data=f"admin:{game_id}:start_game")])
 
-    rows.append([InlineKeyboardButton(text="💳 Начать сбор оплат", callback_data=f"admin:{game_id}:confirm_payments")])
+    if status != "payment_collection":
+        rows.append([InlineKeyboardButton(text="💳 Начать сбор оплат", callback_data=f"admin:{game_id}:confirm_payments")])
+
+    rows.append([InlineKeyboardButton(text="🏁 Завершить игру", callback_data=f"admin:{game_id}:finish_game")])
     rows.append([InlineKeyboardButton(text="❌ Отменить игру", callback_data=f"admin:{game_id}:confirm_cancel")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_cancel_edit_keyboard(game_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"admin:{game_id}:settings")],
+    ])
+
+
+def admin_finish_game_keyboard(game_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏁 Завершить без медиа/текста", callback_data=f"admin:{game_id}:do_finish_nocomment")],
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"admin:{game_id}:settings")],
+    ])
 
 
 def card_confirmation_keyboard(game_id: str, duration_minutes: int) -> InlineKeyboardMarkup:
