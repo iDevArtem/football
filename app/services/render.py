@@ -112,7 +112,7 @@ def format_game_location_fallback(game: dict) -> str | None:
     if addr_str:
         quote_parts.append(f"📮 {addr_str}")
     if map_url:
-        quote_parts.append(f"🚗 <a href=\"{map_url}\">Открыть на карте (Google Maps)</a>")
+        quote_parts.append(f"🚗 <a href=\"{map_url}\">Google Maps</a>")
     return f"🗺 <b>Локация и навигация:</b>\n<blockquote>{chr(10).join(quote_parts)}</blockquote>"
 
 
@@ -260,7 +260,7 @@ def format_game_rich_html(game: dict, participants: list[dict], payments: list[d
     lng = loc["longitude"]
     map_url = f"https://maps.google.com/?q={lat},{lng}"
     loc_desc = f"📍 <b>{title_str}</b>" + (f" ({addr_str})" if addr_str else "")
-    loc_desc += f"\n🚗 <a href=\"{map_url}\">Открыть на карте Google Maps</a>"
+    loc_desc += f"\n🚗 <a href=\"{map_url}\">Google Maps</a>"
     header_parts.append(f"🗺 <b>Локация:</b>\n<blockquote>{loc_desc}</blockquote>")
 
     header_text = "\n\n".join(header_parts)

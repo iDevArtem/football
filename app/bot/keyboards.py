@@ -28,13 +28,9 @@ def game_keyboard(
                 InlineKeyboardButton(text="➖ Отменить друга", callback_data=f"game:{game_id}:cancel_friend"),
             ])
 
-    bottom_row = []
-    if location and location.get("latitude") is not None and location.get("longitude") is not None:
-        map_url = f"https://maps.google.com/?q={location['latitude']},{location['longitude']}"
-        bottom_row.append(InlineKeyboardButton(text="📍 На карте", url=map_url))
-
-    bottom_row.append(InlineKeyboardButton(text="⚙️ Управление", callback_data=f"admin:{game_id}:settings"))
-    rows.append(bottom_row)
+    rows.append([
+        InlineKeyboardButton(text="⚙️ Управление", callback_data=f"admin:{game_id}:settings"),
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

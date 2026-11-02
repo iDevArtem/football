@@ -242,7 +242,7 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
             message.answer.assert_called_once()
             self.assertIn("Локация сохранена", message.answer.call_args[0][0])
 
-    def test_game_keyboard_has_map_button(self):
+    def test_game_keyboard_does_not_have_map_button(self):
         from app.bot.keyboards import game_keyboard
         loc = {
             "title": "Стадион Чемпион",
@@ -253,8 +253,9 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
         kb = game_keyboard("64a8b79f2e3d4c5b6a7b8c9d", friends_allowed=False, location=loc)
         buttons = [btn for row in kb.inline_keyboard for btn in row]
         map_btns = [b for b in buttons if b.text == "📍 На карте"]
-        self.assertEqual(len(map_btns), 1)
-        self.assertEqual(map_btns[0].url, "https://maps.google.com/?q=50.4501,30.5234")
+        self.assertEqual(len(map_btns), 0)
+        settings_btns = [b for b in buttons if b.callback_data == "admin:64a8b79f2e3d4c5b6a7b8c9d:settings"]
+        self.assertEqual(len(settings_btns), 1)
 
     async def test_new_game_single_message_with_link_preview(self):
         from app.bot.handlers import new_game
