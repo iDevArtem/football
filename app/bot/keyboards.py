@@ -12,7 +12,7 @@ def game_keyboard(game_id: str, friends_allowed: bool, status: str = "registrati
         rows.append([
             InlineKeyboardButton(text="👥 Оплата друзей", callback_data=f"pay:{game_id}:friends"),
         ])
-    elif status not in {"cancelled", "registration_closed", "closed"}:
+    elif status not in {"cancelled", "registration_closed", "closed", "game_started"}:
         rows.append([
             InlineKeyboardButton(text="✅ Буду", callback_data=f"game:{game_id}:join"),
             InlineKeyboardButton(text="❌ Не буду", callback_data=f"game:{game_id}:decline"),
@@ -37,7 +37,8 @@ def admin_game_keyboard(game_id: str, *, friends_allowed: bool, status: str) -> 
     close_action = "confirm_open_registration" if status == "registration_closed" else "confirm_close_registration"
     friends_text = "👥 Закрыть друзей" if friends_allowed else "👥 Открыть друзей"
     friends_action = "close_friends" if friends_allowed else "open_friends"
-    return InlineKeyboardMarkup(inline_keyboard=[
+    
+    rows = [
         [
             InlineKeyboardButton(text="📅 Дата", callback_data=f"admin:{game_id}:edit_date"),
             InlineKeyboardButton(text="💰 Цена", callback_data=f"admin:{game_id}:edit_price"),
@@ -51,10 +52,24 @@ def admin_game_keyboard(game_id: str, *, friends_allowed: bool, status: str) -> 
             InlineKeyboardButton(text="👥 Таймер друзей", callback_data=f"admin:{game_id}:edit_friends_hours"),
         ],
         [InlineKeyboardButton(text="📢 Публикация в группах", callback_data=f"admin:{game_id}:broadcast_menu")],
-        [InlineKeyboardButton(text=friends_text, callback_data=f"admin:{game_id}:{friends_action}")],
-        [InlineKeyboardButton(text=close_text, callback_data=f"admin:{game_id}:{close_action}")],
-        [InlineKeyboardButton(text="💳 Начать сбор оплат", callback_data=f"admin:{game_id}:confirm_payments")],
-        [InlineKeyboardButton(text="❌ Отменить игру", callback_data=f"admin:{game_id}:confirm_cancel")],
+    ]
+
+    if status not in {"game_started", "payment_collection"}:
+        rows.append([InlineKeyboardButton(text=friends_text, callback_data=f"admin:{game_id}:{friends_action}")])
+        rows.append([InlineKeyboardButton(text=close_text, callback_data=f"admin:{game_id}:{close_action}")])
+        rows.append([InlineKeyboardButton(text="▶️ Начать игру", callback_data=f"admin:{game_id}:start_game")])
+
+    rows.append([InlineKeyboardButton(text="💳 Начать сбор оплат", callback_data=f"admin:{game_id}:confirm_payments")])
+    rows.append([InlineKeyboardButton(text="❌ Отменить игру", callback_data=f"admin:{game_id}:confirm_cancel")])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def card_confirmation_keyboard(game_id: str, duration_minutes: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Оставить эту карту", callback_data=f"admin:{game_id}:card_keep:{duration_minutes}")],
+        [InlineKeyboardButton(text="✏️ Изменить карту", callback_data=f"admin:{game_id}:card_edit:{duration_minutes}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:{game_id}:confirm_payments")],
     ])
 
 

@@ -6,7 +6,7 @@ export interface Participant {
   id: string;
   telegram_id?: number | null;
   display_name: string;
-  type: "player" | "friend";
+  type: "player" | "friend" | "guest";
   status: "confirmed" | "reserve" | "declined" | "removed";
   position: number;
   added_by_telegram_id?: number | null;
@@ -65,6 +65,11 @@ export function RosterList({
                       {p.type === "friend" && (
                         <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                           друг
+                        </span>
+                      )}
+                      {p.type === "guest" && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          гость
                         </span>
                       )}
                     </p>
@@ -135,6 +140,11 @@ export function RosterList({
                       {p.type === "friend" && (
                         <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                           друг
+                        </span>
+                      )}
+                      {p.type === "guest" && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          гость
                         </span>
                       )}
                     </p>

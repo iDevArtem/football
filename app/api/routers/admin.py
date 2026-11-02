@@ -12,6 +12,7 @@ from app.repositories.games import GameRepository
 from app.repositories.participants import ParticipantRepository
 from app.repositories.payments import PaymentRepository
 from app.repositories.chats import ChatRepository
+from app.repositories.settings import SettingsRepository
 from app.api.dependencies import require_admin
 from app.api.sync import trigger_sync
 from app.bot.bot_instance import get_bot
@@ -71,6 +72,13 @@ class ToggleFriendsRequest(BaseModel):
 
 class StartPaymentRequest(BaseModel):
     duration_minutes: int = 90
+    card_number: Optional[str] = None
+    card_recipient: Optional[str] = None
+
+
+class AddGuestRequest(BaseModel):
+    display_name: str
+    status: Optional[str] = "confirmed"
 
 
 class ParticipantStatusRequest(BaseModel):
@@ -198,10 +206,38 @@ async def toggle_friends(
     return {"friends_allowed": req.allowed}
 
 
+@router.post("/games/{game_id}/start")
+async def start_game(
+    game_id: str,
+    admin_user: dict = Depends(require_admin),
+):
+    try:
+        ObjectId(game_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid game_id")
+
+    db = get_db()
+    game_repo = GameRepository(db)
+    game = await game_repo.get(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    await game_repo.set_status(game_id, "game_started")
+    updated = await game_repo.get(game_id)
+
+    bot = get_bot()
+    if bot:
+        await update_game_message(bot, updated)
+    trigger_sync(game_id)
+
+    return {"status": "game_started"}
+
+
 @router.post("/games/{game_id}/payment/start")
 async def start_payment(
     game_id: str,
     req: StartPaymentRequest,
+    admin_user: dict = Depends(require_admin),
 ):
     try:
         ObjectId(game_id)
@@ -212,8 +248,9 @@ async def start_payment(
     game_repo = GameRepository(db)
     part_repo = ParticipantRepository(db)
     pay_repo = PaymentRepository(db)
+    settings_repo = SettingsRepository(db)
 
-    game = await game_repo.get_by_id(game_id)
+    game = await game_repo.get(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
@@ -224,6 +261,16 @@ async def start_payment(
     confirmed_count = await part_repo.count_confirmed(game_id)
     per_player = math.ceil(total_cost / confirmed_count) if confirmed_count > 0 else 0
 
+    card_number = (req.card_number or "").strip()
+    card_recipient = (req.card_recipient or "").strip()
+    if not card_number:
+        default_details = await settings_repo.get_default_payment_details()
+        card_number = default_details.get("card_number", "")
+        if not card_recipient:
+            card_recipient = default_details.get("recipient", "")
+    else:
+        await settings_repo.set_default_payment_details(card_number, card_recipient)
+
     await db.games.update_one(
         {"_id": ObjectId(game_id)},
         {"$set": {
@@ -231,10 +278,18 @@ async def start_payment(
             "duration_minutes": minutes,
             "total_cost": total_cost,
             "price": per_player,
+            "payment_details": {
+                "card_number": card_number,
+                "recipient": card_recipient,
+            },
             "updated_at": datetime.now(timezone.utc),
         }}
     )
     await pay_repo.ensure_for_game(game_id, per_player)
+    updated = await game_repo.get(game_id)
+    bot = get_bot()
+    if bot:
+        await update_game_message(bot, updated)
     trigger_sync(game_id)
 
     return {
@@ -243,7 +298,50 @@ async def start_payment(
         "total_cost": total_cost,
         "price_per_player": per_player,
         "confirmed_count": confirmed_count,
+        "payment_details": {
+            "card_number": card_number,
+            "recipient": card_recipient,
+        },
     }
+
+
+@router.post("/games/{game_id}/participants/guest")
+async def add_guest_participant(
+    game_id: str,
+    req: AddGuestRequest,
+    admin_user: dict = Depends(require_admin),
+):
+    try:
+        ObjectId(game_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid game_id")
+
+    if not req.display_name.strip():
+        raise HTTPException(status_code=400, detail="Display name cannot be empty")
+
+    db = get_db()
+    game_repo = GameRepository(db)
+    part_repo = ParticipantRepository(db)
+
+    game = await game_repo.get(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    guest = await part_repo.add_guest(
+        game=game,
+        display_name=req.display_name,
+        added_by_telegram_id=admin_user["telegram_id"],
+        status=req.status or "confirmed",
+    )
+
+    updated_game = await game_repo.get(game_id)
+    bot = get_bot()
+    if bot:
+        await update_game_message(bot, updated_game)
+    trigger_sync(game_id)
+
+    from app.api.routers.games import serialize_participant
+    return serialize_participant(guest)
 
 
 @router.patch("/games/{game_id}/participants/{participant_id}")

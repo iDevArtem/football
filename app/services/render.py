@@ -10,6 +10,7 @@ def status_text(status: str) -> str:
         "registration_open": "запись открыта",
         "friends_allowed": "друзья открыты",
         "registration_closed": "запись закрыта",
+        "game_started": "игра началась ⚽",
         "payment_collection": "сбор оплат",
         "cancelled": "игра отменена",
         "closed": "закрыта",
@@ -126,6 +127,14 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
             f"❌ Не оплатили: <b>{pending_count}</b>",
             "",
         ]
+
+        pay_details = game.get("payment_details") or {}
+        card_number = pay_details.get("card_number")
+        recipient = pay_details.get("recipient")
+        if card_number:
+            recipient_str = f" ({escape(recipient)})" if recipient else ""
+            lines.append(f"💳 Оплата на карту:\n<code>{escape(card_number)}</code>{recipient_str}\n(нажмите на номер, чтобы скопировать)")
+            lines.append("")
     elif confirmed:
         lines.append("<b>Основной состав:</b>")
         for index, p in enumerate(confirmed, 1):
@@ -144,7 +153,9 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
         lines.append(f"❌ Отказались: {len(declined)}")
         lines.append("")
 
-    if status == "payment_collection":
+    if status == "game_started":
+        lines.append("⚽ Матч начался! Запись и отмены заблокированы.")
+    elif status == "payment_collection":
         lines.append("Сбор оплат начат. Нажмите кнопку ниже: оплатил или не играл.")
     elif status == "cancelled":
         lines.append("Игра отменена. Кнопки записи отключены.")

@@ -127,6 +127,27 @@ class ParticipantRepository:
         await self.normalize_roster(game_id, game["max_players"])
         return await self.db.participants.find_one({"_id": result.inserted_id})
 
+    async def add_guest(self, game: dict, display_name: str, added_by_telegram_id: int, status: str = "confirmed") -> dict:
+        game_id = str(game["_id"])
+        now = datetime.now(timezone.utc)
+        doc = {
+            "game_id": game["_id"],
+            "telegram_id": None,
+            "type": "guest",
+            "status": status,
+            "added_by_telegram_id": added_by_telegram_id,
+            "display_name": display_name.strip(),
+            "position": await self.next_position(game_id),
+            "created_at": now,
+            "updated_at": now,
+        }
+        result = await self.db.participants.insert_one(doc)
+        doc["_id"] = result.inserted_id
+        if "max_players" in game:
+            await self.normalize_roster(game_id, game["max_players"])
+        found = await self.db.participants.find_one({"_id": result.inserted_id})
+        return found or doc
+
     async def cancel_friend(self, game_id: str, friend_id: str, added_by_telegram_id: int) -> bool:
         result = await self.db.participants.update_one(
             {

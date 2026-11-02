@@ -22,8 +22,26 @@ async def open_friends_job(bot) -> None:
         await update_game_message(bot, game)
 
 
+async def check_and_start_due_games_job(bot) -> None:
+    db = get_db()
+    game_repo = GameRepository(db)
+    games = await game_repo.games_to_auto_start()
+    for game in games:
+        g_id = str(game["_id"])
+        await game_repo.set_status(g_id, "game_started")
+        updated_game = await game_repo.get(g_id)
+        from app.bot.handlers import update_game_message
+        await update_game_message(bot, updated_game)
+        try:
+            from app.api.sync import trigger_sync
+            trigger_sync(g_id)
+        except Exception:
+            pass
+
+
 def setup_scheduler(bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     scheduler.add_job(open_friends_job, "interval", minutes=5, args=[bot], max_instances=1)
+    scheduler.add_job(check_and_start_due_games_job, "interval", minutes=1, args=[bot], max_instances=1)
     scheduler.start()
     return scheduler

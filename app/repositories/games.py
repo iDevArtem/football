@@ -7,6 +7,7 @@ ACTIVE_STATUSES = [
     "registration_closed",
     "friends_allowed",
     "full",
+    "game_started",
     "payment_collection",
 ]
 
@@ -136,11 +137,25 @@ class GameRepository:
             }},
         )
 
-    async def set_status(self, game_id: str, status: str) -> None:
-        await self.db.games.update_one(
+    async def set_status(self, game_id: str, status: str) -> bool:
+        res = await self.db.games.update_one(
             {"_id": ObjectId(game_id)},
             {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}},
         )
+        return bool(res.matched_count > 0)
+
+    async def set_payment_details(self, game_id: str, card_number: str, recipient: str) -> bool:
+        res = await self.db.games.update_one(
+            {"_id": ObjectId(game_id)},
+            {"$set": {
+                "payment_details": {
+                    "card_number": card_number.strip(),
+                    "recipient": recipient.strip(),
+                },
+                "updated_at": datetime.now(timezone.utc),
+            }},
+        )
+        return bool(res.matched_count > 0)
 
     async def cancel_game(self, game_id: str, reason: str | None = None) -> None:
         await self.db.games.update_one(
@@ -250,5 +265,13 @@ class GameRepository:
             "friends_allowed": False,
             "status": "registration_open",
             "friends_allowed_after": {"$lte": now},
+        })
+        return [doc async for doc in cursor]
+
+    async def games_to_auto_start(self) -> list[dict]:
+        now = datetime.now(timezone.utc)
+        cursor = self.db.games.find({
+            "status": {"$in": ["registration_open", "friends_allowed", "full", "registration_closed"]},
+            "start_at": {"$lte": now},
         })
         return [doc async for doc in cursor]

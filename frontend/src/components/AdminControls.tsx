@@ -1,12 +1,14 @@
 // frontend/src/components/AdminControls.tsx
 import React, { useState, useEffect } from "react";
-import { PlusCircle, Ban, Users, DollarSign, Send, Settings, Check } from "lucide-react";
+import { Play, UserPlus, Ban, Users, DollarSign, Send, Settings, Check } from "lucide-react";
 import { apiRequest } from "../api/client";
 
 interface AdminControlsProps {
   gameId: string;
   gameStatus: string;
   friendsAllowed: boolean;
+  initialCardNumber?: string;
+  initialRecipient?: string;
   onRefresh: () => void;
 }
 
@@ -14,15 +16,29 @@ export function AdminControls({
   gameId,
   gameStatus,
   friendsAllowed,
+  initialCardNumber = "",
+  initialRecipient = "",
   onRefresh,
 }: AdminControlsProps) {
   const [loading, setLoading] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showGuestModal, setShowGuestModal] = useState(false);
+  const [guestName, setGuestName] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [chats, setChats] = useState<{ chat_id: number; title: string }[]>([]);
   const [selectedChats, setSelectedChats] = useState<number[]>([]);
+
+  // Payment modal state
+  const [durationMinutes, setDurationMinutes] = useState(90);
+  const [cardNumber, setCardNumber] = useState(initialCardNumber);
+  const [cardRecipient, setCardRecipient] = useState(initialRecipient);
+
+  useEffect(() => {
+    if (initialCardNumber) setCardNumber(initialCardNumber);
+    if (initialRecipient) setCardRecipient(initialRecipient);
+  }, [initialCardNumber, initialRecipient]);
 
   useEffect(() => {
     if (showPublishModal) {
@@ -34,6 +50,34 @@ export function AdminControls({
         .catch(() => {});
     }
   }, [showPublishModal]);
+
+  const handleStartGame = async () => {
+    setLoading(true);
+    try {
+      await apiRequest(`/api/admin/games/${gameId}/start`, {
+        method: "POST",
+      });
+      onRefresh();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddGuest = async () => {
+    if (!guestName.trim()) return;
+    setLoading(true);
+    try {
+      await apiRequest(`/api/admin/games/${gameId}/participants/guest`, {
+        method: "POST",
+        body: JSON.stringify({ display_name: guestName.trim() }),
+      });
+      setGuestName("");
+      setShowGuestModal(false);
+      onRefresh();
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleToggleFriends = async () => {
     setLoading(true);
@@ -48,12 +92,16 @@ export function AdminControls({
     }
   };
 
-  const handleStartPayment = async (durationMinutes: number) => {
+  const handleStartPayment = async () => {
     setLoading(true);
     try {
       await apiRequest(`/api/admin/games/${gameId}/payment/start`, {
         method: "POST",
-        body: JSON.stringify({ duration_minutes: durationMinutes }),
+        body: JSON.stringify({
+          duration_minutes: durationMinutes,
+          card_number: cardNumber.trim(),
+          card_recipient: cardRecipient.trim(),
+        }),
       });
       setShowPaymentModal(false);
       onRefresh();
@@ -91,6 +139,12 @@ export function AdminControls({
     }
   };
 
+  const canStartGame =
+    gameStatus !== "game_started" &&
+    gameStatus !== "payment_collection" &&
+    gameStatus !== "closed" &&
+    gameStatus !== "cancelled";
+
   return (
     <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-5 mb-6 shadow-xl">
       <div className="flex items-center justify-between mb-4">
@@ -103,25 +157,49 @@ export function AdminControls({
         </span>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {/* Toggle Friends */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {/* Start Game Button (if not started) */}
+        {canStartGame && (
+          <button
+            onClick={handleStartGame}
+            disabled={loading}
+            className="p-2.5 rounded-xl bg-teal-500/20 border border-teal-500/40 text-teal-300 hover:bg-teal-500/30 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+          >
+            <Play className="w-3.5 h-3.5" />
+            Начать игру
+          </button>
+        )}
+
+        {/* Add Guest Button */}
         <button
-          onClick={handleToggleFriends}
-          disabled={loading || gameStatus === "cancelled"}
-          className={`p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition ${
-            friendsAllowed
-              ? "bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
-              : "bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700"
-          }`}
+          onClick={() => setShowGuestModal(true)}
+          disabled={loading || gameStatus === "cancelled" || gameStatus === "closed"}
+          className="p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
         >
-          <Users className="w-3.5 h-3.5" />
-          {friendsAllowed ? "Закрыть друзей" : "Открыть друзей"}
+          <UserPlus className="w-3.5 h-3.5 text-amber-400" />
+          + Гость
         </button>
+
+        {/* Toggle Friends */}
+        {gameStatus !== "game_started" && gameStatus !== "payment_collection" && (
+          <button
+            onClick={handleToggleFriends}
+            disabled={loading || gameStatus === "cancelled"}
+            className={`p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition ${
+              friendsAllowed
+                ? "bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
+                : "bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700"
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            {friendsAllowed ? "Закрыть друзей" : "Открыть друзей"}
+          </button>
+        )}
 
         {/* Start Payment */}
         <button
           onClick={() => setShowPaymentModal(true)}
-          disabled={loading || gameStatus === "cancelled"}
+          disabled={loading || gameStatus === "cancelled" || gameStatus === "closed"}
           className="p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
         >
           <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
@@ -149,43 +227,125 @@ export function AdminControls({
         </button>
       </div>
 
-      {/* Payment Duration Modal */}
+      {/* Guest Modal */}
+      {showGuestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl">
+            <h4 className="text-base font-bold text-white mb-2">Добавить гостя (без Telegram)</h4>
+            <p className="text-xs text-slate-400 mb-4">
+              Введите имя игрока, пришедшего на поле:
+            </p>
+            <div className="space-y-3 mb-5">
+              <input
+                type="text"
+                placeholder="Имя игрока (например, Игорь)"
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+                autoFocus
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setShowGuestModal(false)}
+                className="py-2.5 rounded-xl bg-slate-800 text-slate-400 text-xs font-semibold hover:text-white"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleAddGuest}
+                disabled={loading || !guestName.trim()}
+                className="py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white text-xs font-bold transition"
+              >
+                Добавить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Modal with Card Details */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl">
             <h4 className="text-base font-bold text-white mb-2">Запуск сбора оплат</h4>
             <p className="text-xs text-slate-400 mb-4">
-              Выберите фактическую длительность матча для автоматического деления аренды поля:
+              Выберите фактическую длительность и проверьте реквизиты карты:
             </p>
-            <div className="space-y-2.5 mb-5">
+
+            {/* Duration Selector */}
+            <div className="grid grid-cols-2 gap-2 mb-4">
               <button
-                onClick={() => handleStartPayment(90)}
-                className="w-full p-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-left border border-slate-700 transition flex items-center justify-between"
+                type="button"
+                onClick={() => setDurationMinutes(90)}
+                className={`p-3 rounded-2xl border text-left transition ${
+                  durationMinutes === 90
+                    ? "bg-emerald-500/10 border-emerald-500/50 text-white"
+                    : "bg-slate-800 border-slate-700 text-slate-400"
+                }`}
               >
-                <div>
-                  <p className="text-xs font-bold text-white">⏱ 1.5 часа (90 мин)</p>
-                  <p className="text-[10px] text-slate-400">Аренда поля: 900 грн</p>
-                </div>
-                <span className="text-xs font-mono font-bold text-emerald-400">600 грн/ч</span>
+                <p className="text-xs font-bold">1.5 часа (90 мин)</p>
+                <p className="text-[10px] text-emerald-400 mt-0.5">900 грн</p>
               </button>
 
               <button
-                onClick={() => handleStartPayment(120)}
-                className="w-full p-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-left border border-slate-700 transition flex items-center justify-between"
+                type="button"
+                onClick={() => setDurationMinutes(120)}
+                className={`p-3 rounded-2xl border text-left transition ${
+                  durationMinutes === 120
+                    ? "bg-emerald-500/10 border-emerald-500/50 text-white"
+                    : "bg-slate-800 border-slate-700 text-slate-400"
+                }`}
               >
-                <div>
-                  <p className="text-xs font-bold text-white">⏱ 2.0 часа (120 мин)</p>
-                  <p className="text-[10px] text-slate-400">Аренда поля: 1200 грн</p>
-                </div>
-                <span className="text-xs font-mono font-bold text-emerald-400">600 грн/ч</span>
+                <p className="text-xs font-bold">2.0 часа (120 мин)</p>
+                <p className="text-[10px] text-emerald-400 mt-0.5">1200 грн</p>
               </button>
             </div>
-            <button
-              onClick={() => setShowPaymentModal(false)}
-              className="w-full py-2.5 rounded-xl bg-slate-800 text-slate-400 text-xs font-semibold hover:text-white"
-            >
-              Отмена
-            </button>
+
+            {/* Card Inputs */}
+            <div className="space-y-3 mb-5">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-300 block mb-1">
+                  Номер банковской карты:
+                </label>
+                <input
+                  type="text"
+                  placeholder="4441 1111 2222 3333"
+                  value={cardNumber}
+                  onChange={(e) => setCardNumber(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs font-mono placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-semibold text-slate-300 block mb-1">
+                  Имя получателя (опционально):
+                </label>
+                <input
+                  type="text"
+                  placeholder="Иван И."
+                  value={cardRecipient}
+                  onChange={(e) => setCardRecipient(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setShowPaymentModal(false)}
+                className="py-2.5 rounded-xl bg-slate-800 text-slate-400 text-xs font-semibold hover:text-white"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleStartPayment}
+                disabled={loading}
+                className="py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold shadow-lg shadow-emerald-500/20 active:scale-95 transition"
+              >
+                {loading ? "Запуск..." : "Запустить сбор"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -232,10 +392,10 @@ export function AdminControls({
               </button>
               <button
                 onClick={handlePublish}
-                disabled={selectedChats.length === 0 || loading}
-                className="py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold shadow-md shadow-emerald-500/20"
+                disabled={loading || selectedChats.length === 0}
+                className="py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-emerald-500/20 active:scale-95 transition"
               >
-                Отправить
+                Опубликовать
               </button>
             </div>
           </div>
@@ -246,14 +406,16 @@ export function AdminControls({
       {showCancelModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl">
-            <h4 className="text-base font-bold text-white mb-2">Отмена матча</h4>
-            <p className="text-xs text-slate-400 mb-3">Укажите причину для игроков:</p>
+            <h4 className="text-base font-bold text-white mb-2">Отмена игры</h4>
+            <p className="text-xs text-slate-400 mb-4">
+              Укажите причину отмены игры (будет видно в сообщении группы):
+            </p>
             <input
               type="text"
+              placeholder="Причина (например, плохая погода)"
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
-              placeholder="Например, Погодные условия / ремонт зала"
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mb-4"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-red-500 mb-4"
             />
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -265,9 +427,9 @@ export function AdminControls({
               <button
                 onClick={handleCancelGame}
                 disabled={loading}
-                className="py-2.5 rounded-xl bg-red-500 hover:bg-red-400 text-white text-xs font-semibold"
+                className="py-2.5 rounded-xl bg-red-500 hover:bg-red-400 text-white text-xs font-bold"
               >
-                Подтвердить отмену
+                Подтвердить
               </button>
             </div>
           </div>

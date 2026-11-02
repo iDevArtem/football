@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import { CreditCard, Copy, Check, CheckCircle2, XCircle } from "lucide-react";
 import { useTelegram } from "../hooks/useTelegram";
+import { Participant } from "./RosterList";
 
 interface PaymentBoxProps {
   pricePerPlayer: number;
@@ -10,6 +11,8 @@ interface PaymentBoxProps {
   recipient?: string;
   myStatus: "paid" | "not_played" | "unpaid" | "pending";
   onStatusChange: (status: "paid" | "not_played") => Promise<void>;
+  myFriends?: Participant[];
+  onFriendStatusChange?: (participantId: string, status: "paid" | "not_played") => Promise<void>;
 }
 
 export function PaymentBox({
@@ -19,6 +22,8 @@ export function PaymentBox({
   recipient,
   myStatus,
   onStatusChange,
+  myFriends = [],
+  onFriendStatusChange,
 }: PaymentBoxProps) {
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -95,7 +100,7 @@ export function PaymentBox({
         </div>
       )}
 
-      {/* Action Buttons */}
+      {/* Action Buttons for User */}
       <div className="grid grid-cols-2 gap-2.5">
         <button
           onClick={() => handleAction("paid")}
@@ -123,6 +128,86 @@ export function PaymentBox({
           {myStatus === "not_played" ? "Не играл" : "Не играл"}
         </button>
       </div>
+
+      {/* Friend Payments Section */}
+      {myFriends && myFriends.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-slate-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <h5 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+              <span>👥</span> Ваши приглашенные друзья
+            </h5>
+            <span className="text-[10px] text-slate-400">
+              {myFriends.filter((f) => f.payment_status === "paid").length}/{myFriends.length} оплачено
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {myFriends.map((friend) => (
+              <div
+                key={friend.id}
+                className="bg-slate-950/50 rounded-2xl p-3 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+              >
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+                  <span className="text-xs font-semibold text-slate-200 truncate">
+                    {friend.display_name}
+                  </span>
+                  <span
+                    className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                      friend.payment_status === "paid"
+                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                        : friend.payment_status === "not_played"
+                        ? "bg-slate-800 text-slate-400"
+                        : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                    }`}
+                  >
+                    {friend.payment_status === "paid"
+                      ? "Оплачено"
+                      : friend.payment_status === "not_played"
+                      ? "Не играл"
+                      : "Ожидает"}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                  <button
+                    onClick={async () => {
+                      if (onFriendStatusChange) {
+                        await onFriendStatusChange(friend.id, "paid");
+                      }
+                    }}
+                    disabled={friend.payment_status === "paid"}
+                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition flex items-center gap-1 ${
+                      friend.payment_status === "paid"
+                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-default"
+                        : "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 active:scale-95"
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3 h-3" />
+                    Оплатил
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (onFriendStatusChange) {
+                        await onFriendStatusChange(friend.id, "not_played");
+                      }
+                    }}
+                    disabled={friend.payment_status === "not_played"}
+                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition flex items-center gap-1 ${
+                      friend.payment_status === "not_played"
+                        ? "bg-slate-800 text-slate-500 border border-slate-700 cursor-default"
+                        : "bg-slate-800 hover:bg-slate-700 text-slate-300 active:scale-95"
+                    }`}
+                  >
+                    <XCircle className="w-3 h-3" />
+                    Не играл
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

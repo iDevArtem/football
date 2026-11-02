@@ -214,6 +214,17 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
     await loadGameDetail(game.id);
   };
 
+  const handleFriendPaymentStatus = async (participantId: string, status: "paid" | "not_played") => {
+    if (!game) return;
+    hapticImpact("light");
+    await apiRequest(`/api/games/${game.id}/payment/status`, {
+      method: "POST",
+      body: JSON.stringify({ participant_id: participantId, status }),
+    });
+    hapticNotification("success");
+    await loadGameDetail(game.id);
+  };
+
   const handleAdminParticipantAction = async (p: Participant, action: string) => {
     if (!game || !isAdmin) return;
     const newStatus = action === "toggle_reserve" ? "reserve" : "confirmed";
@@ -262,6 +273,8 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
           gameId={game.id}
           gameStatus={game.status}
           friendsAllowed={game.friends_allowed}
+          initialCardNumber={game.payment_details?.card_number}
+          initialRecipient={game.payment_details?.recipient}
           onRefresh={() => loadGameDetail(game.id)}
         />
       )}
@@ -310,37 +323,45 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
             </div>
 
             {/* Action Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4 border-t border-slate-800">
-              {myParticipant?.status === "confirmed" || myParticipant?.status === "reserve" ? (
-                <button
-                  onClick={handleLeave}
-                  disabled={actionLoading}
-                  className="w-full py-3 rounded-2xl bg-slate-800 hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 text-slate-300 border border-slate-700 font-bold text-xs transition flex items-center justify-center gap-2"
-                >
-                  <XCircle className="w-4 h-4" />
-                  {actionLoading ? "Отменяем..." : "Отказаться от участия"}
-                </button>
-              ) : (
-                <button
-                  onClick={handleJoin}
-                  disabled={actionLoading || game.status === "cancelled"}
-                  className="w-full py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold text-xs shadow-lg shadow-emerald-500/20 active:scale-95 transition flex items-center justify-center gap-2"
-                >
-                  ⚽ {actionLoading ? "Записываем..." : "Буду играть (Записаться)"}
-                </button>
-              )}
+            {game.status === "game_started" ? (
+              <div className="pt-4 border-t border-slate-800 text-center py-2.5 bg-teal-500/10 rounded-2xl border border-teal-500/20">
+                <p className="text-xs font-bold text-teal-300 flex items-center justify-center gap-2">
+                  <span>⚽</span> Матч начался! Запись и отмены заблокированы.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4 border-t border-slate-800">
+                {myParticipant?.status === "confirmed" || myParticipant?.status === "reserve" ? (
+                  <button
+                    onClick={handleLeave}
+                    disabled={actionLoading}
+                    className="w-full py-3 rounded-2xl bg-slate-800 hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 text-slate-300 border border-slate-700 font-bold text-xs transition flex items-center justify-center gap-2"
+                  >
+                    <XCircle className="w-4 h-4" />
+                    {actionLoading ? "Отменяем..." : "Отказаться от участия"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleJoin}
+                    disabled={actionLoading || game.status === "cancelled"}
+                    className="w-full py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold text-xs shadow-lg shadow-emerald-500/20 active:scale-95 transition flex items-center justify-center gap-2"
+                  >
+                    ⚽ {actionLoading ? "Записываем..." : "Буду играть (Записаться)"}
+                  </button>
+                )}
 
-              {/* Friends Button (when allowed) */}
-              {game.friends_allowed && (
-                <button
-                  onClick={() => setShowFriendsModal(true)}
-                  className="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition flex items-center justify-center gap-2"
-                >
-                  <UserPlus className="w-4 h-4 text-emerald-400" />
-                  Добавить друга {myFriends.length > 0 && `(${myFriends.length}/3)`}
-                </button>
-              )}
-            </div>
+                {/* Friends Button (when allowed) */}
+                {game.friends_allowed && (
+                  <button
+                    onClick={() => setShowFriendsModal(true)}
+                    className="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition flex items-center justify-center gap-2"
+                  >
+                    <UserPlus className="w-4 h-4 text-emerald-400" />
+                    Добавить друга {myFriends.length > 0 && `(${myFriends.length}/3)`}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Payment Box (if open) */}
@@ -352,6 +373,8 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
               recipient={game.payment_details?.recipient}
               myStatus={myParticipant?.payment_status || "pending"}
               onStatusChange={handlePaymentStatus}
+              myFriends={myFriends.filter((f) => f.status === "confirmed")}
+              onFriendStatusChange={handleFriendPaymentStatus}
             />
           )}
 

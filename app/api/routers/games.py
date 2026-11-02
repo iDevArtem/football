@@ -9,6 +9,7 @@ from app.repositories.games import GameRepository
 from app.repositories.participants import ParticipantRepository
 from app.repositories.payments import PaymentRepository
 from app.repositories.users import UserRepository
+from app.repositories.settings import SettingsRepository
 from app.api.dependencies import get_current_user, get_optional_user
 from app.api.sync import trigger_sync
 from app.services.render import dynamic_format_text, status_text
@@ -137,9 +138,12 @@ async def get_game_detail(
         serialize_participant(p, pay_map.get(str(p["_id"])))
         for p in participants
     ]
+    settings_repo = SettingsRepository(db)
+    default_details = await settings_repo.get_default_payment_details()
+    game_details = game.get("payment_details") or {}
     serialized["payment_details"] = {
-        "card_number": settings.card_number,
-        "recipient": settings.card_recipient,
+        "card_number": game_details.get("card_number") or default_details.get("card_number", ""),
+        "recipient": game_details.get("recipient") or default_details.get("recipient", ""),
     }
     return serialized
 
@@ -163,7 +167,7 @@ async def join_game(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
     first_name = user.get("first_name", "")
@@ -217,7 +221,7 @@ async def leave_game(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
     first_name = user.get("first_name", "")
@@ -259,7 +263,7 @@ async def add_friend(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
     if not game.get("friends_allowed"):
@@ -289,7 +293,14 @@ async def remove_friend(
         raise HTTPException(status_code=400, detail="Invalid ID")
 
     db = get_db()
+    game_repo = GameRepository(db)
     part_repo = ParticipantRepository(db)
+
+    game = await game_repo.get_by_id(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "payment_collection"}:
+        raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
     success = await part_repo.cancel_friend(game_id, participant_id, user["telegram_id"])
     if not success:

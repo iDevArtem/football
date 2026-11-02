@@ -132,6 +132,8 @@ export function PublicSchedule({ onGoToCabinet }: { onGoToCabinet: (gameId?: str
                           className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
                             g.status === "registration_open" || g.status === "friends_allowed"
                               ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              : g.status === "game_started"
+                              ? "bg-teal-500/10 text-teal-400 border border-teal-500/20 animate-pulse"
                               : g.status === "payment_collection"
                               ? "bg-sky-500/10 text-sky-400 border border-sky-500/20"
                               : "bg-slate-700 text-slate-300"
@@ -203,9 +205,17 @@ export function PublicSchedule({ onGoToCabinet }: { onGoToCabinet: (gameId?: str
                       </button>
                       <button
                         onClick={() => onGoToCabinet(g.id)}
-                        className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold transition shadow-sm"
+                        className={`px-4 py-1.5 rounded-xl text-xs font-bold transition shadow-sm ${
+                          g.status === "game_started"
+                            ? "bg-teal-500 hover:bg-teal-400 text-white"
+                            : "bg-emerald-500 hover:bg-emerald-400 text-white"
+                        }`}
                       >
-                        Записаться ⚽
+                        {g.status === "game_started"
+                          ? "Матч идет ⚽"
+                          : g.status === "payment_collection"
+                          ? "Оплата 💳"
+                          : "Записаться ⚽"}
                       </button>
                     </div>
                   </div>

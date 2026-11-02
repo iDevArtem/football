@@ -13,6 +13,7 @@ from app.repositories.chats import ChatRepository
 from app.repositories.games import GameRepository
 from app.repositories.participants import ParticipantRepository
 from app.repositories.payments import PaymentRepository
+from app.repositories.settings import SettingsRepository
 from app.repositories.users import UserRepository
 from app.bot.keyboards import (
     game_keyboard,
@@ -23,6 +24,7 @@ from app.bot.keyboards import (
     friends_payment_keyboard,
     broadcast_groups_keyboard,
     payment_duration_keyboard,
+    card_confirmation_keyboard,
 )
 from app.services.render import format_game_message, format_payments_message
 from app.utils.dates import parse_date_time, now_tz
@@ -34,6 +36,7 @@ logger = logging.getLogger(__name__)
 # Когда кнопку нажимают в группе, а имя друга вводят в личке, state может не совпасть.
 # Поэтому для приватного ввода друга держим короткое pending-состояние по user_id.
 PENDING_FRIEND_INPUTS: dict[int, dict] = {}
+PENDING_CARD_INPUTS: dict[int, dict] = {}
 # Когда пользователь нажал кнопку в группе, но бот еще не может писать ему в личку,
 # сохраняем намерение и продолжаем после /start в личке.
 PENDING_PRIVATE_ACTIONS: dict[int, dict] = {}
@@ -41,6 +44,10 @@ PENDING_PRIVATE_ACTIONS: dict[int, dict] = {}
 
 class AddFriendState(StatesGroup):
     waiting_name = State()
+
+
+class AdminCardState(StatesGroup):
+    waiting_card = State()
 
 
 class AdminEditState(StatesGroup):
@@ -633,6 +640,80 @@ async def payments(message: Message) -> None:
             await delete_message_safely(message)
 
 
+async def execute_start_payments(
+    bot,
+    game_id: str,
+    minutes: int,
+    card_number: str,
+    recipient: str,
+    edit_message_fn=None,
+    callback=None,
+) -> None:
+    db = get_db()
+    game_repo = GameRepository(db)
+    game = await game_repo.get(game_id)
+    if not game:
+        return
+    hourly_rate = game.get("hourly_rate", 600)
+    total_cost = int((minutes / 60) * hourly_rate)
+    participants_repo = ParticipantRepository(db)
+    confirmed_count = await participants_repo.count_confirmed(game_id)
+    import math
+    per_player = math.ceil(total_cost / confirmed_count) if confirmed_count > 0 else 0
+
+    from bson import ObjectId
+    await db.games.update_one(
+        {"_id": ObjectId(game_id)},
+        {"$set": {
+            "status": "payment_collection",
+            "duration_minutes": minutes,
+            "total_cost": total_cost,
+            "price": per_player,
+            "payment_details": {
+                "card_number": card_number.strip(),
+                "recipient": recipient.strip(),
+            },
+            "updated_at": datetime.now(timezone.utc),
+        }}
+    )
+    settings_repo = SettingsRepository(db)
+    await settings_repo.set_default_payment_details(card_number, recipient)
+
+    pay_repo = PaymentRepository(db)
+    await pay_repo.ensure_for_game(game_id, per_player)
+    fresh = await game_repo.get(game_id)
+    await update_game_message(bot, fresh)
+    try:
+        from app.api.sync import trigger_sync
+        trigger_sync(game_id)
+    except Exception:
+        pass
+
+    duration_hours = round(minutes / 60, 1)
+    if duration_hours.is_integer():
+        duration_hours = int(duration_hours)
+
+    card_info = f"\nКарта: <code>{card_number.strip()}</code>"
+    if recipient.strip():
+        card_info += f" ({recipient.strip()})"
+
+    msg_text = (
+        f"✅ Сбор оплат начат!\n\n"
+        f"Длительность: <b>{duration_hours} ч</b> ({minutes} мин)\n"
+        f"Аренда поля: <b>{total_cost} грн</b>\n"
+        f"Игроков в основе: <b>{confirmed_count}</b>\n"
+        f"С каждого игрока: <b>{per_player} грн</b>"
+        f"{card_info}\n\n"
+        f"Карточки игры во всех группах обновлены."
+    )
+    if edit_message_fn:
+        from app.bot.keyboards import admin_game_keyboard
+        markup = admin_game_keyboard(game_id, friends_allowed=fresh.get("friends_allowed", False), status=fresh.get("status"))
+        await edit_message_fn(msg_text, markup)
+    if callback:
+        await callback.answer("Сбор оплат запущен!")
+
+
 @router.callback_query(F.data.startswith("admin:"))
 async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
     _, game_id, action = callback.data.split(":", 2)
@@ -805,6 +886,19 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
         return
 
+    if action == "start_game":
+        await game_repo.set_status(game_id, "game_started")
+        game = await game_repo.get(game_id)
+        await update_game_message(callback.bot, game)
+        try:
+            from app.api.sync import trigger_sync
+            trigger_sync(game_id)
+        except Exception:
+            pass
+        await show_or_refresh_admin_message()
+        await callback.answer("Игра началась ⚽")
+        return
+
     if action == "confirm_payments":
         hourly_rate = game.get("hourly_rate", 600)
         await edit_admin_message(
@@ -816,42 +910,49 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
 
     if action.startswith("paydur:"):
         minutes = int(action.split(":", 1)[1])
-        hourly_rate = game.get("hourly_rate", 600)
-        total_cost = int((minutes / 60) * hourly_rate)
-        participants_repo = ParticipantRepository(db)
-        confirmed_count = await participants_repo.count_confirmed(game_id)
-        import math
-        per_player = math.ceil(total_cost / confirmed_count) if confirmed_count > 0 else 0
-
-        from bson import ObjectId
-        await db.games.update_one(
-            {"_id": ObjectId(game_id)},
-            {"$set": {
-                "status": "payment_collection",
-                "duration_minutes": minutes,
-                "total_cost": total_cost,
-                "price": per_player,
-                "updated_at": datetime.now(timezone.utc),
-            }}
-        )
-        pay_repo = PaymentRepository(db)
-        await pay_repo.ensure_for_game(game_id, per_player)
-        fresh = await game_repo.get(game_id)
-        await update_game_message(callback.bot, fresh)
-
-        duration_hours = round(minutes / 60, 1)
-        if duration_hours.is_integer():
-            duration_hours = int(duration_hours)
+        settings_repo = SettingsRepository(db)
+        card_details = await settings_repo.get_default_payment_details()
+        card_num = card_details.get("card_number") or "не указана"
+        rec = card_details.get("recipient") or ""
+        rec_str = f" ({rec})" if rec else ""
         await edit_admin_message(
-            f"✅ Сбор оплат начат!\n\n"
-            f"Длительность: <b>{duration_hours} ч</b> ({minutes} мин)\n"
-            f"Аренда поля: <b>{total_cost} грн</b>\n"
-            f"Игроков в основе: <b>{confirmed_count}</b>\n"
-            f"С каждого игрока: <b>{per_player} грн</b>\n\n"
-            f"Карточки игры во всех группах обновлены.",
-            admin_markup(fresh),
+            f"⏱ Длительность: <b>{minutes} мин</b>\n\n"
+            f"💳 <b>Реквизиты для оплаты:</b>\n"
+            f"Номер: <code>{card_num}</code>{rec_str}\n\n"
+            f"Использовать эту карту или ввести другую?",
+            card_confirmation_keyboard(game_id, minutes),
         )
-        await callback.answer("Сбор оплат запущен!")
+        await callback.answer()
+        return
+
+    if action.startswith("card_keep:"):
+        minutes = int(action.split(":", 1)[1])
+        settings_repo = SettingsRepository(db)
+        card_details = await settings_repo.get_default_payment_details()
+        await execute_start_payments(
+            callback.bot,
+            game_id,
+            minutes,
+            card_details.get("card_number", ""),
+            card_details.get("recipient", ""),
+            edit_message_fn=edit_admin_message,
+            callback=callback,
+        )
+        return
+
+    if action.startswith("card_edit:"):
+        minutes = int(action.split(":", 1)[1])
+        PENDING_CARD_INPUTS[callback.from_user.id] = {
+            "game_id": game_id,
+            "duration": minutes,
+        }
+        await state.set_state(AdminCardState.waiting_card)
+        await state.update_data(game_id=game_id, duration=minutes)
+        await edit_admin_message(
+            "💳 Введите номер карты и имя получателя одним сообщением:\n\n<i>Например: 4441 1111 2222 3333 Иван И.</i>",
+            None,
+        )
+        await callback.answer()
         return
 
     if action == "open_friends":
@@ -933,8 +1034,8 @@ async def game_callback(callback: CallbackQuery, state: FSMContext) -> None:
     if game.get("status") == "registration_closed" and action in {"join", "add_friend"}:
         await callback.answer("Запись закрыта", show_alert=True)
         return
-    if game.get("status") == "payment_collection" and action in {"join", "decline", "add_friend", "cancel_friend"}:
-        await callback.answer("Игра уже в режиме оплаты", show_alert=True)
+    if game.get("status") in {"game_started", "payment_collection"} and action in {"join", "decline", "add_friend", "cancel_friend"}:
+        await callback.answer("Матч уже идет или начался сбор оплат", show_alert=True)
         return
 
     await user_repo.upsert_from_telegram(callback.from_user, is_admin=is_admin(callback.from_user.id))
@@ -1063,7 +1164,7 @@ async def process_friend_name(message: Message, state: FSMContext | None, data: 
         PENDING_FRIEND_INPUTS.pop(message.from_user.id, None)
         return
 
-    if game.get("status") in {"cancelled", "registration_closed", "payment_collection"}:
+    if game.get("status") in {"cancelled", "registration_closed", "game_started", "payment_collection"}:
         await cleanup_friend_input(message, data)
         await temporary_reply(message, "❌ Сейчас нельзя добавлять друзей.")
         if state:
@@ -1192,6 +1293,47 @@ async def admin_edit_value(message: Message, state: FSMContext) -> None:
             friends_allowed=game.get("friends_allowed", False),
             status=game.get("status"),
         ),
+    )
+
+
+@router.message(AdminCardState.waiting_card)
+@router.message(F.chat.type == "private", lambda message: message.from_user.id in PENDING_CARD_INPUTS)
+async def admin_card_input(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        PENDING_CARD_INPUTS.pop(message.from_user.id, None)
+        return
+    data = await state.get_data() if state else {}
+    if not data:
+        data = PENDING_CARD_INPUTS.get(message.from_user.id) or {}
+    game_id = data.get("game_id")
+    minutes = data.get("duration", 90)
+
+    text = (message.text or "").strip()
+    import re
+    match = re.search(r"(\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4})", text)
+    if match:
+        raw_card = match.group(1).replace("-", " ")
+        digits = "".join(filter(str.isdigit, raw_card))
+        card_number = " ".join([digits[i:i+4] for i in range(0, 16, 4)])
+        recipient = text.replace(match.group(1), "").strip()
+    else:
+        card_number = text
+        recipient = ""
+
+    await state.clear()
+    PENDING_CARD_INPUTS.pop(message.from_user.id, None)
+
+    async def _send_summary(msg_text, markup):
+        await message.answer(msg_text, reply_markup=markup)
+
+    await execute_start_payments(
+        message.bot,
+        game_id,
+        minutes,
+        card_number,
+        recipient,
+        edit_message_fn=_send_summary,
     )
 
 
