@@ -30,7 +30,11 @@ from app.bot.keyboards import (
     admin_finish_game_keyboard,
 )
 from app.services.render import format_game_message, format_payments_message
-from app.services.rich_message import send_game_message, edit_game_message
+from app.services.rich_message import (
+    send_game_message,
+    edit_game_message,
+    broadcast_media_report,
+)
 from app.utils.dates import parse_date_time, now_tz
 from app.utils.location import parse_location_input
 
@@ -1650,6 +1654,9 @@ async def _apply_location_update(message: Message, state: FSMContext, loc: dict)
     )
 
 
+FINISH_ALBUM_BUFFERS: dict[str, list[Message]] = {}
+
+
 @router.message(AdminFinishGameState.waiting_content)
 async def admin_finish_game_content(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
@@ -1660,40 +1667,61 @@ async def admin_finish_game_content(message: Message, state: FSMContext) -> None
     game_id = data.get("game_id")
     admin_message_id = data.get("admin_message_id")
 
+    # Album buffering for multi-photo/video uploads (Telegram sends albums as separate messages)
+    if message.media_group_id:
+        group_id = message.media_group_id
+        if group_id in FINISH_ALBUM_BUFFERS:
+            FINISH_ALBUM_BUFFERS[group_id].append(message)
+            return
+
+        FINISH_ALBUM_BUFFERS[group_id] = [message]
+        import asyncio
+        await asyncio.sleep(0.35)
+        messages = FINISH_ALBUM_BUFFERS.pop(group_id, [message])
+    else:
+        messages = [message]
+
     db = get_db()
     game_repo = GameRepository(db)
     game = await game_repo.get(game_id)
     if not game:
-        await delete_message_safely(message)
+        for m in messages:
+            await delete_message_safely(m)
         await state.clear()
         return
 
-    media_type = None
-    media_file_id = None
+    media_items = []
     finish_note = None
 
-    if message.photo:
-        media_type = "photo"
-        media_file_id = message.photo[-1].file_id
-        finish_note = (message.caption or "").strip() or None
-    elif message.video:
-        media_type = "video"
-        media_file_id = message.video.file_id
-        finish_note = (message.caption or "").strip() or None
-    elif message.text:
-        finish_note = message.text.strip() or None
+    for m in messages:
+        if m.photo:
+            media_items.append({"type": "photo", "file_id": m.photo[-1].file_id})
+        elif m.video:
+            media_items.append({"type": "video", "file_id": m.video.file_id})
+        elif m.text:
+            finish_note = m.text.strip() or finish_note
 
-    await delete_message_safely(message)
+        if m.caption and not finish_note:
+            finish_note = m.caption.strip()
+
+        await delete_message_safely(m)
+
     await state.clear()
 
     await game_repo.finish_game(
         game_id,
         finish_note=finish_note,
-        media_type=media_type,
-        media_file_id=media_file_id,
+        media_items=media_items,
     )
     game = await game_repo.get(game_id)
     await update_game_message(message.bot, game)
+
+    if media_items:
+        unique_chat_ids = list(dict.fromkeys(
+            m["chat_id"] for m in game.get("messages", []) if "chat_id" in m
+        ))
+        await broadcast_media_report(message.bot, unique_chat_ids, media_items)
+
     try:
         from app.api.sync import trigger_sync
         trigger_sync(game_id)
@@ -1701,6 +1729,8 @@ async def admin_finish_game_content(message: Message, state: FSMContext) -> None
         pass
 
     success_text = "🏁 <b>Игра успешно завершена!</b>\n\nКарточки игры во всех группах обновлены."
+    if media_items:
+        success_text += "\n📸 Фотоотчет опубликован во всех группах."
     markup = admin_game_keyboard(game_id, friends_allowed=game.get("friends_allowed", False), status="finished")
     if admin_message_id:
         try:

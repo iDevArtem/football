@@ -121,30 +121,7 @@ async def edit_game_message(
     reply_markup: InlineKeyboardMarkup | None = None,
     link_preview_options: LinkPreviewOptions | None = None,
 ) -> Message | bool:
-    """Редактирует карточку игры через стандартный edit_message_text или edit_message_media, если прикреплено фото/видео."""
-    media_file_id = game.get("media_file_id")
-    if media_file_id:
-        caption = format_game_caption(game, participants, payments, max_length=1024)
-        media_type = game.get("media_type", "photo")
-        MediaClass = InputMediaVideo if media_type == "video" else InputMediaPhoto
-        media_obj = MediaClass(media=media_file_id, caption=caption, parse_mode="HTML")
-        try:
-            res = bot.edit_message_media(
-                chat_id=chat_id,
-                message_id=message_id,
-                media=media_obj,
-                reply_markup=reply_markup,
-            )
-            if hasattr(res, "__await__"):
-                return await res
-            return res
-        except TelegramBadRequest as e:
-            err_text = str(e).lower()
-            if "not modified" in err_text:
-                return True
-            # Fallback to text editing if media replacement is rejected
-            pass
-
+    """Редактирует карточку игры через стандартный edit_message_text."""
     text = format_game_message(game, participants, payments)
     try:
         res = bot.edit_message_text(
@@ -163,3 +140,49 @@ async def edit_game_message(
         if "not modified" in err_text:
             return True
         raise
+
+
+async def broadcast_media_report(
+    bot: Bot,
+    chat_ids: list[int],
+    media_items: list[dict],
+    finish_note: str | None = None,
+) -> None:
+    """Отправляет фотоотчет (одно фото/видео или альбом) во все привязанные группы игры."""
+    if not media_items or not chat_ids:
+        return
+
+    caption = "📸 <b>Фотоотчет с матча</b>"
+    if finish_note:
+        caption += f"\n\n{finish_note}"
+
+    is_single = len(media_items) == 1
+    for cid in chat_ids:
+        try:
+            if is_single:
+                item = media_items[0]
+                if item.get("type") == "video":
+                    await bot.send_video(
+                        chat_id=cid,
+                        video=item["file_id"],
+                        caption=caption,
+                        parse_mode="HTML",
+                    )
+                else:
+                    await bot.send_photo(
+                        chat_id=cid,
+                        photo=item["file_id"],
+                        caption=caption,
+                        parse_mode="HTML",
+                    )
+            else:
+                group = []
+                for idx, item in enumerate(media_items[:10]):
+                    MediaClass = InputMediaVideo if item.get("type") == "video" else InputMediaPhoto
+                    if idx == 0:
+                        group.append(MediaClass(media=item["file_id"], caption=caption, parse_mode="HTML"))
+                    else:
+                        group.append(MediaClass(media=item["file_id"]))
+                await bot.send_media_group(chat_id=cid, media=group)
+        except (TelegramBadRequest, TelegramForbiddenError) as e:
+            logger.warning("Failed to send media report to chat %s: %s", cid, e)

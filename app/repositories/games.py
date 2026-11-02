@@ -193,6 +193,7 @@ class GameRepository:
         self,
         game_id: str,
         finish_note: str | None = None,
+        media_items: list[dict] | None = None,
         media_type: str | None = None,
         media_file_id: str | None = None,
     ) -> None:
@@ -202,10 +203,10 @@ class GameRepository:
         }
         if finish_note is not None:
             update_data["finish_note"] = finish_note
-        if media_type is not None:
-            update_data["media_type"] = media_type
-        if media_file_id is not None:
-            update_data["media_file_id"] = media_file_id
+        if media_items is not None:
+            update_data["media_items"] = media_items
+        elif media_type and media_file_id:
+            update_data["media_items"] = [{"type": media_type, "file_id": media_file_id}]
         await self.db.games.update_one(
             {"_id": ObjectId(game_id)},
             {"$set": update_data},

@@ -78,8 +78,7 @@ async def test_game_repo_finish_game():
     await repo.finish_game(
         game_id,
         finish_note="Счёт 4:2",
-        media_type="photo",
-        media_file_id="photo_file_123",
+        media_items=[{"type": "photo", "file_id": "photo_file_123"}],
     )
 
     db.games.update_one.assert_called_once()
@@ -89,8 +88,7 @@ async def test_game_repo_finish_game():
     assert filter_arg == {"_id": ObjectId(game_id)}
     assert update_arg["status"] == "finished"
     assert update_arg["finish_note"] == "Счёт 4:2"
-    assert update_arg["media_type"] == "photo"
-    assert update_arg["media_file_id"] == "photo_file_123"
+    assert update_arg["media_items"] == [{"type": "photo", "file_id": "photo_file_123"}]
 
 
 @pytest.mark.asyncio
@@ -152,6 +150,7 @@ async def test_admin_finish_game_with_photo():
     message = MagicMock()
     message.from_user.id = 111
     message.chat.id = 111
+    message.media_group_id = None
     message.photo = [photo_mock]
     message.video = None
     message.text = None
@@ -171,11 +170,13 @@ async def test_admin_finish_game_with_photo():
     mock_game = {
         "_id": ObjectId("6724123456789abcdef01234"),
         "status": "game_started",
+        "messages": [{"chat_id": -100111, "message_id": 1}],
     }
 
     with patch("app.bot.handlers.is_admin", return_value=True), \
          patch("app.bot.handlers.get_db") as mock_db, \
-         patch("app.bot.handlers.update_game_message", new_callable=AsyncMock) as mock_update:
+         patch("app.bot.handlers.update_game_message", new_callable=AsyncMock) as mock_update, \
+         patch("app.bot.handlers.broadcast_media_report", new_callable=AsyncMock) as mock_broadcast:
 
         game_repo = MagicMock()
         game_repo.get = AsyncMock(return_value=mock_game)
@@ -188,21 +189,88 @@ async def test_admin_finish_game_with_photo():
         game_repo.finish_game.assert_called_once_with(
             "6724123456789abcdef01234",
             finish_note="Победа 5:3!",
-            media_type="photo",
-            media_file_id="tg_photo_file_id",
+            media_items=[{"type": "photo", "file_id": "tg_photo_file_id"}],
         )
         mock_update.assert_called_once()
+        mock_broadcast.assert_called_once_with(
+            message.bot,
+            [-100111],
+            [{"type": "photo", "file_id": "tg_photo_file_id"}],
+        )
         message.bot.edit_message_text.assert_called_once()
         assert "Игра успешно завершена" in message.bot.edit_message_text.call_args.kwargs["text"]
 
 
 @pytest.mark.asyncio
-async def test_edit_game_message_with_media():
+async def test_admin_finish_game_with_album_deduplication():
+    import asyncio
+    from app.bot.handlers import admin_finish_game_content
+
+    messages = []
+    for i in range(3):
+        m = MagicMock()
+        m.from_user.id = 111
+        m.chat.id = 111
+        m.media_group_id = "test_album_123"
+        m.photo = [MagicMock(file_id=f"photo_{i}")]
+        m.video = None
+        m.text = None
+        m.caption = "Победа 5:3!" if i == 0 else None
+        m.delete = AsyncMock()
+        m.bot = MagicMock()
+        m.bot.edit_message_text = AsyncMock()
+        m.answer = AsyncMock()
+        messages.append(m)
+
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={
+        "game_id": "6724123456789abcdef01234",
+        "admin_message_id": 5555,
+    })
+    state.clear = AsyncMock()
+
+    mock_game = {
+        "_id": ObjectId("6724123456789abcdef01234"),
+        "status": "game_started",
+        "messages": [{"chat_id": -100111, "message_id": 1}],
+    }
+
+    with patch("app.bot.handlers.is_admin", return_value=True), \
+         patch("app.bot.handlers.get_db") as mock_db, \
+         patch("app.bot.handlers.update_game_message", new_callable=AsyncMock) as mock_update, \
+         patch("app.bot.handlers.broadcast_media_report", new_callable=AsyncMock) as mock_broadcast:
+
+        game_repo = MagicMock()
+        game_repo.get = AsyncMock(return_value=mock_game)
+        game_repo.finish_game = AsyncMock()
+
+        with patch("app.bot.handlers.GameRepository", return_value=game_repo):
+            # Dispatch 3 concurrent messages of the same media group
+            await asyncio.gather(
+                admin_finish_game_content(messages[0], state),
+                admin_finish_game_content(messages[1], state),
+                admin_finish_game_content(messages[2], state),
+            )
+
+        # Game finished strictly ONCE!
+        game_repo.finish_game.assert_called_once()
+        call_args = game_repo.finish_game.call_args.kwargs
+        assert call_args["finish_note"] == "Победа 5:3!"
+        assert len(call_args["media_items"]) == 3
+        # Broadcast media report called ONCE!
+        mock_broadcast.assert_called_once()
+        assert len(mock_broadcast.call_args[0][2]) == 3
+        # All messages deleted
+        for m in messages:
+            m.delete.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_edit_game_message_remains_text():
     from app.services.rich_message import edit_game_message
-    from aiogram.types import InputMediaPhoto
 
     bot = MagicMock()
-    bot.edit_message_media = AsyncMock(return_value=True)
+    bot.edit_message_text = AsyncMock(return_value=True)
 
     game = {
         "title": "Футбол",
@@ -212,8 +280,6 @@ async def test_edit_game_message_with_media():
         "duration_minutes": 90,
         "status": "finished",
         "finish_note": "Финал сезона",
-        "media_type": "photo",
-        "media_file_id": "photo_id_777",
     }
     participants = [{"display_name": "Игрок 1", "status": "confirmed", "type": "user"}]
 
@@ -224,9 +290,30 @@ async def test_edit_game_message_with_media():
         game=game,
         participants=participants,
     )
-    bot.edit_message_media.assert_called_once()
-    media_arg = bot.edit_message_media.call_args.kwargs["media"]
-    assert isinstance(media_arg, InputMediaPhoto)
-    assert media_arg.media == "photo_id_777"
-    assert "Финал сезона" in media_arg.caption
+    bot.edit_message_text.assert_called_once()
+    assert "Финал сезона" in bot.edit_message_text.call_args.kwargs["text"]
+
+
+@pytest.mark.asyncio
+async def test_broadcast_media_report_album():
+    from app.services.rich_message import broadcast_media_report
+    from aiogram.types import InputMediaPhoto
+
+    bot = MagicMock()
+    bot.send_media_group = AsyncMock(return_value=[MagicMock()])
+    bot.send_photo = AsyncMock()
+
+    media_items = [
+        {"type": "photo", "file_id": "photo_1"},
+        {"type": "photo", "file_id": "photo_2"},
+    ]
+    await broadcast_media_report(bot, [-100123], media_items)
+
+    bot.send_media_group.assert_called_once()
+    assert bot.send_media_group.call_args.kwargs["chat_id"] == -100123
+    media = bot.send_media_group.call_args.kwargs["media"]
+    assert len(media) == 2
+    assert isinstance(media[0], InputMediaPhoto)
+    assert media[0].media == "photo_1"
+    assert "Фотоотчет" in media[0].caption
 
