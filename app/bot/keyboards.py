@@ -33,11 +33,9 @@ def game_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_game_keyboard(game_id: str, *, friends_allowed: bool, status: str) -> InlineKeyboardMarkup:
+def admin_game_keyboard(game_id: str, *, friends_allowed: bool, status: str) -> InlineKeyboardMarkup | None:
     if status in {"cancelled", "finished"}:
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="↩️ Вернуть игру", callback_data=f"admin:{game_id}:confirm_restore")],
-        ])
+        return None
 
     close_text = "🔓 Открыть запись" if status == "registration_closed" else "🔒 Закрыть запись"
     close_action = "confirm_open_registration" if status == "registration_closed" else "confirm_close_registration"
@@ -121,7 +119,6 @@ def admin_confirm_keyboard(game_id: str, action: str) -> InlineKeyboardMarkup:
         "close_registration": "🔒 Да, закрыть запись",
         "open_registration": "🔓 Да, открыть запись",
         "cancel": "❌ Да, отменить игру",
-        "restore": "↩️ Да, вернуть игру",
         "payments": "💳 Да, начать сбор оплат",
     }
     return InlineKeyboardMarkup(inline_keyboard=[

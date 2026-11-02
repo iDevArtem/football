@@ -111,13 +111,13 @@ class GameRepository:
 
     async def get_manageable_for_chat(self, chat_id: int) -> dict | None:
         return await self.db.games.find_one(
-            {"messages.chat_id": chat_id, "status": {"$in": ACTIVE_STATUSES + ["cancelled", "finished"]}},
+            {"messages.chat_id": chat_id, "status": {"$in": ACTIVE_STATUSES}},
             sort=[("created_at", -1)],
         )
 
     async def get_latest_manageable(self) -> dict | None:
         return await self.db.games.find_one(
-            {"status": {"$in": ACTIVE_STATUSES + ["cancelled", "finished"]}},
+            {"status": {"$in": ACTIVE_STATUSES}},
             sort=[("created_at", -1)],
         )
 

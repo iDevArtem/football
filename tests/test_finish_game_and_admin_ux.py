@@ -23,6 +23,12 @@ def test_admin_keyboard_finish_game_available_in_active_statuses():
         assert "🏁 Завершить игру" in buttons, f"Missing in status {st}"
 
 
+def test_admin_keyboard_cancelled_and_finished_returns_none():
+    game_id = "6724123456789abcdef01234"
+    assert admin_game_keyboard(game_id, friends_allowed=False, status="cancelled") is None
+    assert admin_game_keyboard(game_id, friends_allowed=False, status="finished") is None
+
+
 def test_admin_cancel_edit_keyboard():
     game_id = "6724123456789abcdef01234"
     kb = admin_cancel_edit_keyboard(game_id)
@@ -197,8 +203,7 @@ async def test_admin_finish_game_with_photo():
             [-100111],
             [{"type": "photo", "file_id": "tg_photo_file_id"}],
         )
-        message.bot.edit_message_text.assert_called_once()
-        assert "Игра успешно завершена" in message.bot.edit_message_text.call_args.kwargs["text"]
+        message.bot.delete_message.assert_called_once_with(chat_id=111, message_id=5555)
 
 
 @pytest.mark.asyncio
@@ -263,6 +268,7 @@ async def test_admin_finish_game_with_album_deduplication():
         # All messages deleted
         for m in messages:
             m.delete.assert_called_once()
+        messages[0].bot.delete_message.assert_called_once_with(chat_id=111, message_id=5555)
 
 
 @pytest.mark.asyncio
@@ -316,4 +322,71 @@ async def test_broadcast_media_report_album():
     assert isinstance(media[0], InputMediaPhoto)
     assert media[0].media == "photo_1"
     assert "Фотоотчет" in media[0].caption
+
+
+@pytest.mark.asyncio
+async def test_admin_do_cancel_deletes_management_menu():
+    from app.bot.handlers import admin_callback
+
+    callback = MagicMock()
+    callback.data = "admin:6724123456789abcdef01234:do_cancel"
+    callback.from_user.id = 111
+    callback.message = MagicMock()
+    callback.message.delete = AsyncMock()
+    callback.answer = AsyncMock()
+    state = AsyncMock()
+
+    mock_game = {
+        "_id": ObjectId("6724123456789abcdef01234"),
+        "status": "registration_open",
+    }
+
+    with patch("app.bot.handlers.is_admin", return_value=True), \
+         patch("app.bot.handlers.get_db") as mock_db, \
+         patch("app.bot.handlers.update_game_message", new_callable=AsyncMock) as mock_update:
+
+        game_repo = MagicMock()
+        game_repo.get = AsyncMock(return_value=mock_game)
+        game_repo.cancel_game = AsyncMock()
+
+        with patch("app.bot.handlers.GameRepository", return_value=game_repo):
+            await admin_callback(callback, state)
+
+        game_repo.cancel_game.assert_called_once()
+        callback.message.delete.assert_called_once()
+        callback.answer.assert_called_once_with("Игра отменена")
+
+
+@pytest.mark.asyncio
+async def test_admin_do_finish_nocomment_deletes_management_menu():
+    from app.bot.handlers import admin_callback
+
+    callback = MagicMock()
+    callback.data = "admin:6724123456789abcdef01234:do_finish_nocomment"
+    callback.from_user.id = 111
+    callback.message = MagicMock()
+    callback.message.delete = AsyncMock()
+    callback.answer = AsyncMock()
+    state = AsyncMock()
+
+    mock_game = {
+        "_id": ObjectId("6724123456789abcdef01234"),
+        "status": "game_started",
+    }
+
+    with patch("app.bot.handlers.is_admin", return_value=True), \
+         patch("app.bot.handlers.get_db") as mock_db, \
+         patch("app.bot.handlers.update_game_message", new_callable=AsyncMock) as mock_update:
+
+        game_repo = MagicMock()
+        game_repo.get = AsyncMock(return_value=mock_game)
+        game_repo.finish_game = AsyncMock()
+
+        with patch("app.bot.handlers.GameRepository", return_value=game_repo):
+            await admin_callback(callback, state)
+
+        game_repo.finish_game.assert_called_once_with("6724123456789abcdef01234")
+        callback.message.delete.assert_called_once()
+        callback.answer.assert_called_once_with("Игра завершена 🏁")
+
 

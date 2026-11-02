@@ -608,7 +608,7 @@ async def cancel_game(message: Message) -> None:
         return
     await delete_message_safely(message)
     await message.answer(
-        "Подтвердить отмену игры? Ее можно будет вернуть позже.",
+        "Подтвердить отмену игры? Действие необратимо.",
         reply_markup=admin_confirm_keyboard(str(game["_id"]), "cancel"),
     )
 
@@ -1026,7 +1026,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
 
     if action == "confirm_cancel":
         await edit_admin_message(
-            "Подтвердить отмену игры? Запись можно будет вернуть позже.",
+            "Подтвердить отмену игры? Действие необратимо.",
             admin_confirm_keyboard(game_id, "cancel"),
         )
         await callback.answer()
@@ -1044,14 +1044,6 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await edit_admin_message(
             "Открыть запись обратно?",
             admin_confirm_keyboard(game_id, "open_registration"),
-        )
-        await callback.answer()
-        return
-
-    if action == "confirm_restore":
-        await edit_admin_message(
-            "Вернуть отмененную игру и снова открыть запись?",
-            admin_confirm_keyboard(game_id, "restore"),
         )
         await callback.answer()
         return
@@ -1196,14 +1188,6 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Запись открыта")
         return
 
-    if action == "do_restore":
-        await game_repo.restore_game(game_id)
-        game = await game_repo.get(game_id)
-        await update_game_message(callback.bot, game)
-        await show_or_refresh_admin_message()
-        await callback.answer("Игра возвращена")
-        return
-
     if action == "do_payments":
         pay_repo = PaymentRepository(db)
         await pay_repo.ensure_for_game(game_id, game["price"])
@@ -1218,7 +1202,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await game_repo.cancel_game(game_id, "отменено админом")
         game = await game_repo.get(game_id)
         await update_game_message(callback.bot, game)
-        await show_or_refresh_admin_message()
+        await delete_message_safely(callback.message)
         await callback.answer("Игра отменена")
         return
 
@@ -1245,10 +1229,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             trigger_sync(game_id)
         except Exception:
             pass
-        await edit_admin_message(
-            "🏁 <b>Игра успешно завершена!</b>\n\nКарточки игры во всех группах обновлены.",
-            admin_game_keyboard(game_id, friends_allowed=game.get("friends_allowed", False), status="finished"),
-        )
+        await delete_message_safely(callback.message)
         await callback.answer("Игра завершена 🏁")
         return
 
@@ -1728,23 +1709,14 @@ async def admin_finish_game_content(message: Message, state: FSMContext) -> None
     except Exception:
         pass
 
-    success_text = "🏁 <b>Игра успешно завершена!</b>\n\nКарточки игры во всех группах обновлены."
-    if media_items:
-        success_text += "\n📸 Фотоотчет опубликован во всех группах."
-    markup = admin_game_keyboard(game_id, friends_allowed=game.get("friends_allowed", False), status="finished")
     if admin_message_id:
         try:
-            await message.bot.edit_message_text(
+            await message.bot.delete_message(
                 chat_id=message.chat.id,
                 message_id=admin_message_id,
-                text=success_text,
-                reply_markup=markup,
-                parse_mode="HTML",
             )
-            return
-        except TelegramBadRequest:
+        except Exception:
             pass
-    await message.answer(success_text, reply_markup=markup, parse_mode="HTML")
 
 
 @router.message(AdminEditState.waiting_location, F.venue)
