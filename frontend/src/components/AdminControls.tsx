@@ -26,6 +26,7 @@ export function AdminControls({
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showGuestModal, setShowGuestModal] = useState(false);
   const [guestName, setGuestName] = useState("");
+  const [friendError, setFriendError] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [chats, setChats] = useState<{ chat_id: number; title: string }[]>([]);
   const [selectedChats, setSelectedChats] = useState<number[]>([]);
@@ -63,17 +64,20 @@ export function AdminControls({
     }
   };
 
-  const handleAddGuest = async () => {
+  const handleAddFriend = async () => {
     if (!guestName.trim()) return;
     setLoading(true);
+    setFriendError(null);
     try {
-      await apiRequest(`/api/admin/games/${gameId}/participants/guest`, {
+      await apiRequest(`/api/games/${gameId}/friends`, {
         method: "POST",
-        body: JSON.stringify({ display_name: guestName.trim() }),
+        body: JSON.stringify({ friend_name: guestName.trim() }),
       });
       setGuestName("");
       setShowGuestModal(false);
       onRefresh();
+    } catch (err: any) {
+      setFriendError(err.message || "Не удалось добавить друга");
     } finally {
       setLoading(false);
     }
@@ -170,14 +174,22 @@ export function AdminControls({
           </button>
         )}
 
-        {/* Add Guest Button */}
+        {/* Add Friend Button */}
         <button
-          onClick={() => setShowGuestModal(true)}
-          disabled={loading || gameStatus === "cancelled" || gameStatus === "closed"}
-          className="p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+          onClick={() => {
+            setFriendError(null);
+            setShowGuestModal(true);
+          }}
+          disabled={loading || !friendsAllowed || gameStatus === "cancelled" || gameStatus === "closed"}
+          className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+            friendsAllowed
+              ? "bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700"
+              : "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+          }`}
+          title={!friendsAllowed ? "Сначала откройте друзей" : undefined}
         >
-          <UserPlus className="w-3.5 h-3.5 text-amber-400" />
-          + Гость
+          <UserPlus className={`w-3.5 h-3.5 ${friendsAllowed ? "text-amber-400" : "text-slate-600"}`} />
+          + Друг
         </button>
 
         {/* Toggle Friends */}
@@ -227,18 +239,23 @@ export function AdminControls({
         </button>
       </div>
 
-      {/* Guest Modal */}
+      {/* Friend Modal */}
       {showGuestModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl">
-            <h4 className="text-base font-bold text-white mb-2">Добавить гостя (без Telegram)</h4>
+            <h4 className="text-base font-bold text-white mb-2">Добавить друга</h4>
             <p className="text-xs text-slate-400 mb-4">
-              Введите имя игрока, пришедшего на поле:
+              Введите имя друга для добавления в состав:
             </p>
+            {friendError && (
+              <div className="mb-4 p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+                {friendError}
+              </div>
+            )}
             <div className="space-y-3 mb-5">
               <input
                 type="text"
-                placeholder="Имя игрока (например, Игорь)"
+                placeholder="Имя друга (например, Игорь)"
                 value={guestName}
                 onChange={(e) => setGuestName(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
@@ -247,17 +264,20 @@ export function AdminControls({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => setShowGuestModal(false)}
+                onClick={() => {
+                  setShowGuestModal(false);
+                  setFriendError(null);
+                }}
                 className="py-2.5 rounded-xl bg-slate-800 text-slate-400 text-xs font-semibold hover:text-white"
               >
                 Отмена
               </button>
               <button
-                onClick={handleAddGuest}
+                onClick={handleAddFriend}
                 disabled={loading || !guestName.trim()}
                 className="py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white text-xs font-bold transition"
               >
-                Добавить
+                {loading ? "Добавляем..." : "Добавить"}
               </button>
             </div>
           </div>

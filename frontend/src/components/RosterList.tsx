@@ -62,14 +62,9 @@ export function RosterList({
                   <div className="truncate">
                     <p className="text-xs font-semibold text-slate-200 truncate flex items-center gap-1.5">
                       {p.display_name}
-                      {p.type === "friend" && (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                          друг
-                        </span>
-                      )}
-                      {p.type === "guest" && (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                          гость
+                      {(p.type === "friend" || p.type === "guest") && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center gap-0.5">
+                          <span>👥</span> друг
                         </span>
                       )}
                     </p>
@@ -137,14 +132,9 @@ export function RosterList({
                   <div className="truncate">
                     <p className="text-xs font-semibold text-slate-300 truncate flex items-center gap-1.5">
                       {p.display_name}
-                      {p.type === "friend" && (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                          друг
-                        </span>
-                      )}
-                      {p.type === "guest" && (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                          гость
+                      {(p.type === "friend" || p.type === "guest") && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center gap-0.5">
+                          <span>👥</span> друг
                         </span>
                       )}
                     </p>

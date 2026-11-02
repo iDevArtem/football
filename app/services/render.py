@@ -105,7 +105,7 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
         lines.append("<b>Основной состав и оплата:</b>")
         if confirmed:
             for index, participant in enumerate(confirmed, 1):
-                mark = "👥" if participant["type"] == "friend" else "•"
+                mark = "👥" if participant.get("type") in ("friend", "guest") else "•"
                 payment = payment_by_participant_id.get(str(participant["_id"]))
                 payment_status = payment.get("status") if payment else "pending"
                 if payment_status == "paid":
@@ -138,14 +138,14 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
     elif confirmed:
         lines.append("<b>Основной состав:</b>")
         for index, p in enumerate(confirmed, 1):
-            mark = "👥" if p["type"] == "friend" else "•"
+            mark = "👥" if p.get("type") in ("friend", "guest") else "•"
             lines.append(f"{index}. {mark} {escape(p['display_name'])}")
         lines.append("")
 
     if reserve:
         lines.append("<b>Резерв:</b>")
         for index, p in enumerate(reserve, 1):
-            mark = "👥" if p["type"] == "friend" else "•"
+            mark = "👥" if p.get("type") in ("friend", "guest") else "•"
             lines.append(f"{index}. {mark} {escape(p['display_name'])}")
         lines.append("")
 

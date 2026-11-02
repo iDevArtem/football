@@ -13,6 +13,7 @@ from app.repositories.settings import SettingsRepository
 from app.api.dependencies import get_current_user, get_optional_user
 from app.api.sync import trigger_sync
 from app.services.render import dynamic_format_text, status_text
+from app.bot.bot_instance import get_bot
 
 # For patching in tests
 from app.bot.handlers import update_game_message
@@ -275,6 +276,10 @@ async def add_friend(
         raise HTTPException(status_code=400, detail="Maximum 3 friends allowed per participant")
 
     friend = await part_repo.add_friend(game, user["telegram_id"], req.friend_name)
+    updated_game = await game_repo.get(game_id)
+    bot = get_bot()
+    if bot and updated_game:
+        await update_game_message(bot, updated_game)
     trigger_sync(game_id)
 
     return serialize_participant(friend)
@@ -306,6 +311,10 @@ async def remove_friend(
     if not success:
         raise HTTPException(status_code=404, detail="Friend participant not found or not owned by user")
 
+    updated_game = await game_repo.get(game_id)
+    bot = get_bot()
+    if bot and updated_game:
+        await update_game_message(bot, updated_game)
     trigger_sync(game_id)
     return {"status": "removed"}
 

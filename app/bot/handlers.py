@@ -857,12 +857,14 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Удалено из группы")
         return
 
-    if action in {"edit_date", "edit_price", "edit_teams", "edit_players"}:
+    if action in {"edit_date", "edit_price", "edit_teams", "edit_players", "edit_duration", "edit_friends_hours"}:
         prompts = {
             "edit_date": "📅 Введите новую дату и время:\n<code>2026-11-06 19:00</code>",
             "edit_price": "💰 Введите новую цену числом:\n<code>250</code>",
             "edit_teams": "👥 Введите количество команд:\n<code>3</code>",
             "edit_players": "🏃 Введите игроков в команде:\n<code>6</code>",
+            "edit_duration": "⏱ Введите новую длительность игры в минутах (например, 90 или 120):",
+            "edit_friends_hours": "👥 Введите через сколько часов открывать друзей (например, 6):",
         }
         await state.set_state(AdminEditState.waiting_value)
         await state.update_data(game_id=game_id, edit_action=action, admin_message_id=callback.message.message_id)
