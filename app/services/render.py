@@ -70,7 +70,11 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
     if loc and (loc.get("title") or loc.get("address")):
         title_part = escape(loc.get("title", ""))
         addr_part = f" ({escape(loc.get('address', ''))})" if loc.get("address") else ""
-        lines.append(f"📍 Место: <b>{title_part}</b>{addr_part}")
+        if loc.get("latitude") is not None and loc.get("longitude") is not None:
+            map_url = f"https://maps.google.com/?q={loc['latitude']},{loc['longitude']}"
+            lines.append(f"📍 Место: <a href=\"{map_url}\"><b>{title_part}</b></a>{addr_part}")
+        else:
+            lines.append(f"📍 Место: <b>{title_part}</b>{addr_part}")
     if status == "cancelled" and game.get("cancel_reason"):
         lines.append(f"Причина: <b>{escape(game['cancel_reason'])}</b>")
 

@@ -1,7 +1,12 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
-def game_keyboard(game_id: str, friends_allowed: bool, status: str = "registration_open") -> InlineKeyboardMarkup | None:
+def game_keyboard(
+    game_id: str,
+    friends_allowed: bool,
+    status: str = "registration_open",
+    location: dict | None = None,
+) -> InlineKeyboardMarkup | None:
     rows = []
 
     if status == "payment_collection":
@@ -23,7 +28,13 @@ def game_keyboard(game_id: str, friends_allowed: bool, status: str = "registrati
                 InlineKeyboardButton(text="➖ Отменить друга", callback_data=f"game:{game_id}:cancel_friend"),
             ])
 
-    rows.append([InlineKeyboardButton(text="⚙️ Управление", callback_data=f"admin:{game_id}:settings")])
+    bottom_row = []
+    if location and location.get("latitude") is not None and location.get("longitude") is not None:
+        map_url = f"https://maps.google.com/?q={location['latitude']},{location['longitude']}"
+        bottom_row.append(InlineKeyboardButton(text="📍 На карте", url=map_url))
+
+    bottom_row.append(InlineKeyboardButton(text="⚙️ Управление", callback_data=f"admin:{game_id}:settings"))
+    rows.append(bottom_row)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

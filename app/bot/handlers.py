@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, CallbackQuery, ChatMemberUpdated
+from aiogram.types import Message, CallbackQuery, ChatMemberUpdated, LinkPreviewOptions
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from datetime import datetime, timezone
 
@@ -78,7 +78,30 @@ def can_add_friends_now(game: dict) -> bool:
     return now >= friends_after
 
 
-async def _update_single_message(bot, game_repo, chat_repo, game_id: str, chat_id: int, message_id: int, text: str, reply_markup) -> None:
+def get_game_link_preview_options(game: dict) -> LinkPreviewOptions:
+    loc = game.get("location")
+    if loc and loc.get("latitude") is not None and loc.get("longitude") is not None:
+        map_url = f"https://maps.google.com/?q={loc['latitude']},{loc['longitude']}"
+        return LinkPreviewOptions(
+            is_disabled=False,
+            url=map_url,
+            prefer_large_media=True,
+            show_above_text=False,
+        )
+    return LinkPreviewOptions(is_disabled=True)
+
+
+async def _update_single_message(
+    bot,
+    game_repo,
+    chat_repo,
+    game_id: str,
+    chat_id: int,
+    message_id: int,
+    text: str,
+    reply_markup,
+    link_preview_options: LinkPreviewOptions | None = None,
+) -> None:
     try:
         await bot.edit_message_text(
             chat_id=chat_id,
@@ -86,6 +109,7 @@ async def _update_single_message(bot, game_repo, chat_repo, game_id: str, chat_i
             text=text,
             reply_markup=reply_markup,
             parse_mode="HTML",
+            link_preview_options=link_preview_options,
         )
     except TelegramBadRequest as e:
         err_text = str(e).lower()
@@ -113,7 +137,13 @@ async def update_game_message(bot, game: dict) -> None:
     if game.get("status") == "payment_collection":
         payments = await PaymentRepository(db).list_by_game(game_id)
     text = format_game_message(game, participants, payments)
-    reply_markup = game_keyboard(game_id, game.get("friends_allowed", False), game.get("status"))
+    reply_markup = game_keyboard(
+        game_id,
+        game.get("friends_allowed", False),
+        game.get("status"),
+        location=game.get("location"),
+    )
+    link_preview = get_game_link_preview_options(game)
 
     messages = list(game.get("messages", []))
     if not messages and game.get("chat_id") and game.get("message_id"):
@@ -126,7 +156,7 @@ async def update_game_message(bot, game: dict) -> None:
     chat_repo = ChatRepository(db)
     import asyncio
     tasks = [
-        _update_single_message(bot, game_repo, chat_repo, game_id, m["chat_id"], m["message_id"], text, reply_markup)
+        _update_single_message(bot, game_repo, chat_repo, game_id, m["chat_id"], m["message_id"], text, reply_markup, link_preview)
         for m in messages
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -391,41 +421,30 @@ async def new_game(message: Message) -> None:
     )
     game_id = str(game["_id"])
 
+    link_preview = get_game_link_preview_options(game)
+    markup = game_keyboard(game_id, False, game.get("status"), location=game.get("location"))
+
     if is_group:
         await chat_repo.upsert_chat(message.chat.id, message.chat.title or "Группа", message.chat.type)
         sent = await message.answer(
             format_game_message(game, []),
-            reply_markup=game_keyboard(game_id, False, game.get("status")),
+            reply_markup=markup,
             parse_mode="HTML",
+            link_preview_options=link_preview,
         )
-        venue_msg_id = None
-        loc = game.get("location")
-        if loc and loc.get("latitude") is not None and loc.get("longitude") is not None:
-            try:
-                sent_venue = await message.bot.send_venue(
-                    chat_id=message.chat.id,
-                    latitude=loc["latitude"],
-                    longitude=loc["longitude"],
-                    title=loc.get("title", "Футбольное поле"),
-                    address=loc.get("address", ""),
-                )
-                venue_msg_id = sent_venue.message_id
-            except Exception as e:
-                logger.warning("Failed to send venue in chat %s: %s", message.chat.id, e)
-
         await game_repo.set_message_id(game_id, sent.message_id)
         await game_repo.add_linked_message(
             game_id,
             message.chat.id,
             sent.message_id,
             message.chat.title or "Группа",
-            venue_message_id=venue_msg_id,
         )
         await delete_message_safely(message)
     else:
         await message.answer(
             format_game_message(game, []),
             parse_mode="HTML",
+            link_preview_options=link_preview,
         )
         await render_broadcast_menu(message.bot, message.from_user.id, game_id)
 
@@ -830,8 +849,13 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         linked_ids = {m["chat_id"] for m in fresh.get("messages", [])}
         participants = await ParticipantRepository(db).list_by_game(game_id)
         text = format_game_message(fresh, participants)
-        markup = game_keyboard(game_id, fresh.get("friends_allowed", False), fresh.get("status"))
-        loc = fresh.get("location")
+        markup = game_keyboard(
+            game_id,
+            fresh.get("friends_allowed", False),
+            fresh.get("status"),
+            location=fresh.get("location"),
+        )
+        link_preview = get_game_link_preview_options(fresh)
         for chat in chats:
             cid = chat["chat_id"]
             if cid not in linked_ids:
@@ -841,23 +865,9 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
                         text=text,
                         reply_markup=markup,
                         parse_mode="HTML",
+                        link_preview_options=link_preview,
                     )
-                    venue_msg_id = None
-                    if loc and loc.get("latitude") is not None and loc.get("longitude") is not None:
-                        try:
-                            sent_venue = await callback.bot.send_venue(
-                                chat_id=cid,
-                                latitude=loc["latitude"],
-                                longitude=loc["longitude"],
-                                title=loc.get("title", "Футбольное поле"),
-                                address=loc.get("address", ""),
-                            )
-                            venue_msg_id = sent_venue.message_id
-                        except Exception as e:
-                            logger.warning("Failed to send venue in chat %s: %s", cid, e)
-                    await game_repo.add_linked_message(
-                        game_id, cid, sent.message_id, chat.get("title", str(cid)), venue_message_id=venue_msg_id
-                    )
+                    await game_repo.add_linked_message(game_id, cid, sent.message_id, chat.get("title", str(cid)))
                 except (TelegramBadRequest, TelegramForbiddenError):
                     await chat_repo.set_active_status(cid, False)
         await render_broadcast_menu(callback.bot, callback.from_user.id, game_id, callback.message)
@@ -871,30 +881,20 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         chat_title = next((c.get("title", str(target_chat_id)) for c in chats if c["chat_id"] == target_chat_id), "Группа")
         fresh = await game_repo.get(game_id)
         participants = await ParticipantRepository(db).list_by_game(game_id)
-        loc = fresh.get("location")
         try:
             sent = await callback.bot.send_message(
                 chat_id=target_chat_id,
                 text=format_game_message(fresh, participants),
-                reply_markup=game_keyboard(game_id, fresh.get("friends_allowed", False), fresh.get("status")),
+                reply_markup=game_keyboard(
+                    game_id,
+                    fresh.get("friends_allowed", False),
+                    fresh.get("status"),
+                    location=fresh.get("location"),
+                ),
                 parse_mode="HTML",
+                link_preview_options=get_game_link_preview_options(fresh),
             )
-            venue_msg_id = None
-            if loc and loc.get("latitude") is not None and loc.get("longitude") is not None:
-                try:
-                    sent_venue = await callback.bot.send_venue(
-                        chat_id=target_chat_id,
-                        latitude=loc["latitude"],
-                        longitude=loc["longitude"],
-                        title=loc.get("title", "Футбольное поле"),
-                        address=loc.get("address", ""),
-                    )
-                    venue_msg_id = sent_venue.message_id
-                except Exception as e:
-                    logger.warning("Failed to send venue in chat %s: %s", target_chat_id, e)
-            await game_repo.add_linked_message(
-                game_id, target_chat_id, sent.message_id, chat_title, venue_message_id=venue_msg_id
-            )
+            await game_repo.add_linked_message(game_id, target_chat_id, sent.message_id, chat_title)
             await callback.answer(f"Опубликовано в {chat_title}")
         except (TelegramBadRequest, TelegramForbiddenError):
             await chat_repo.set_active_status(target_chat_id, False)

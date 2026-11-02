@@ -128,7 +128,7 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
             },
         }
         text = format_game_message(game, [])
-        self.assertIn("📍 Место: <b>Стадион Чемпион</b> (ул. Спортивная, 5)", text)
+        self.assertIn("📍 Место: <a href=\"https://maps.google.com/?q=50.4501,30.5234\"><b>Стадион Чемпион</b></a> (ул. Спортивная, 5)", text)
 
     def test_render_game_message_without_location(self):
         game = {
@@ -240,7 +240,21 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
             message.answer.assert_called_once()
             self.assertIn("Локация сохранена", message.answer.call_args[0][0])
 
-    async def test_new_game_sends_venue_in_group(self):
+    def test_game_keyboard_has_map_button(self):
+        from app.bot.keyboards import game_keyboard
+        loc = {
+            "title": "Стадион Чемпион",
+            "address": "ул. Спортивная, 5",
+            "latitude": 50.4501,
+            "longitude": 30.5234,
+        }
+        kb = game_keyboard("64a8b79f2e3d4c5b6a7b8c9d", friends_allowed=False, location=loc)
+        buttons = [btn for row in kb.inline_keyboard for btn in row]
+        map_btns = [b for b in buttons if b.text == "📍 На карте"]
+        self.assertEqual(len(map_btns), 1)
+        self.assertEqual(map_btns[0].url, "https://maps.google.com/?q=50.4501,30.5234")
+
+    async def test_new_game_single_message_with_link_preview(self):
         from app.bot.handlers import new_game
         from unittest.mock import patch
 
@@ -249,7 +263,7 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
         message.chat = MagicMock(id=-100123, type="supergroup", title="Football Group")
         message.text = "/new_game 2026-11-06 19:00"
         message.bot = MagicMock()
-        message.bot.send_venue = AsyncMock(return_value=MagicMock(message_id=555))
+        message.bot.send_venue = AsyncMock()
         message.reply = AsyncMock()
         message.answer = AsyncMock(return_value=MagicMock(message_id=444))
         message.delete = AsyncMock()
@@ -276,16 +290,11 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
         with patch("app.bot.handlers.is_admin", return_value=True), \
              patch("app.bot.handlers.get_db", return_value=db):
             await new_game(message)
-            message.bot.send_venue.assert_called_once_with(
-                chat_id=-100123,
-                latitude=50.45,
-                longitude=30.52,
-                title="Арена",
-                address="ул. Полевая, 1",
-            )
-            # Ensure venue_message_id=555 was saved
-            db.games.update_one.assert_called()
-            push_call = [c for c in db.games.update_one.call_args_list if "$push" in c[0][1]]
-            self.assertTrue(len(push_call) > 0)
-            msg_doc = push_call[0][0][1]["$push"]["messages"]
-            self.assertEqual(msg_doc["venue_message_id"], 555)
+            # Only single message sent, send_venue is NOT called
+            message.bot.send_venue.assert_not_called()
+            message.answer.assert_called_once()
+            call_kwargs = message.answer.call_args[1]
+            self.assertIn("link_preview_options", call_kwargs)
+            preview_opt = call_kwargs["link_preview_options"]
+            self.assertFalse(preview_opt.is_disabled)
+            self.assertEqual(preview_opt.url, "https://maps.google.com/?q=50.45,30.52")
