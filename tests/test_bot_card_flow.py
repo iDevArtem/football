@@ -8,12 +8,17 @@ from app.bot.keyboards import (
 
 def test_game_keyboard_game_started():
     kb = game_keyboard("6724123456789abcdef01234", friends_allowed=True, status="game_started")
+    assert kb is None
+
+
+def test_game_keyboard_no_admin_button():
+    kb = game_keyboard("6724123456789abcdef01234", friends_allowed=True, status="registration_open")
     assert kb is not None
     buttons = [btn.text for row in kb.inline_keyboard for btn in row]
-    assert "⚙️ Управление" in buttons
-    assert "✅ Буду" not in buttons
-    assert "❌ Не буду" not in buttons
-    assert "➕ Добавить друга" not in buttons
+    assert "⚙️ Управление" not in buttons
+    assert "✅ Буду" in buttons
+    assert "❌ Не буду" in buttons
+    assert "➕ Добавить друга" in buttons
 
 
 def test_admin_keyboard_start_game_and_payments():
@@ -98,3 +103,50 @@ async def test_execute_start_payments():
         pay_repo.ensure_for_game.assert_called_once_with(game_id, 90)
         settings_repo.set_default_payment_details.assert_called_once_with("4441 2222 3333 4444", "Олег О.")
         mock_update.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_admin_callback_does_not_edit_game_card():
+    from app.bot.handlers import admin_callback
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from bson import ObjectId
+
+    game_id = str(ObjectId())
+    user_id = 12345
+    card_message_id = 999
+
+    callback = MagicMock()
+    callback.data = f"admin:{game_id}:settings"
+    callback.from_user.id = user_id
+    callback.message.chat.id = user_id
+    callback.message.chat.type = "private"
+    callback.message.message_id = card_message_id
+    callback.message.edit_text = AsyncMock()
+    callback.answer = AsyncMock()
+    callback.bot = MagicMock()
+
+    mock_game = {
+        "_id": ObjectId(game_id),
+        "status": "registration_open",
+        "friends_allowed": False,
+        "messages": [
+            {"chat_id": user_id, "message_id": card_message_id, "chat_title": "Личные сообщения"}
+        ],
+    }
+
+    state = AsyncMock()
+
+    with patch("app.bot.handlers.is_admin", return_value=True), \
+         patch("app.bot.handlers.get_db") as mock_get_db, \
+         patch("app.bot.handlers.send_private_message", new_callable=AsyncMock) as mock_send_private:
+        
+        mock_repo = MagicMock()
+        mock_repo.get = AsyncMock(return_value=mock_game)
+        with patch("app.bot.handlers.GameRepository", return_value=mock_repo):
+            await admin_callback(callback, state)
+
+        # Must NOT edit the card message in place
+        callback.message.edit_text.assert_not_called()
+        # Must send private message instead
+        mock_send_private.assert_called_once()
+        callback.answer.assert_called_once()

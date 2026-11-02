@@ -841,6 +841,14 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             "Все действия выполняются здесь, а в карточке игры и группах данные обновляются автоматически."
         )
         markup = admin_markup(fresh)
+        linked_msgs = (fresh or {}).get("messages", [])
+        is_game_card = (
+            callback.message is not None
+            and any(
+                m.get("chat_id") == callback.message.chat.id and m.get("message_id") == callback.message.message_id
+                for m in linked_msgs
+            )
+        )
         is_group_message = callback.message and callback.message.chat.type in ("group", "supergroup")
         if is_group_message:
             sent = await send_private_message(callback.bot, callback.from_user.id, text, reply_markup=markup)
@@ -849,9 +857,8 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             else:
                 await callback.answer("Напиши боту /start в личке, чтобы открыть управление", show_alert=True)
             return
-        if force_new:
+        if force_new or is_game_card:
             await send_private_message(callback.bot, callback.from_user.id, text, reply_markup=markup)
-            await callback.answer()
             return
         try:
             await callback.message.edit_text(text, reply_markup=markup)
@@ -862,8 +869,17 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
                 pass
 
     async def edit_admin_message(text: str, markup) -> None:
+        fresh = await game_repo.get(game_id)
+        linked_msgs = (fresh or {}).get("messages", [])
+        is_game_card = (
+            callback.message is not None
+            and any(
+                m.get("chat_id") == callback.message.chat.id and m.get("message_id") == callback.message.message_id
+                for m in linked_msgs
+            )
+        )
         is_group_message = callback.message and callback.message.chat.type in ("group", "supergroup")
-        if is_group_message:
+        if is_group_message or is_game_card:
             sent = await send_private_message(callback.bot, callback.from_user.id, text, reply_markup=markup, parse_mode="HTML")
             if not sent:
                 await callback.answer("Напиши боту /start в личке, чтобы открыть управление", show_alert=True)

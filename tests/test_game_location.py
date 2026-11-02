@@ -255,7 +255,7 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
         map_btns = [b for b in buttons if b.text == "📍 На карте"]
         self.assertEqual(len(map_btns), 0)
         settings_btns = [b for b in buttons if b.callback_data == "admin:64a8b79f2e3d4c5b6a7b8c9d:settings"]
-        self.assertEqual(len(settings_btns), 1)
+        self.assertEqual(len(settings_btns), 0)
 
     async def test_new_game_single_message_with_link_preview(self):
         from app.bot.handlers import new_game

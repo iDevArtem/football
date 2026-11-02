@@ -28,9 +28,8 @@ def game_keyboard(
                 InlineKeyboardButton(text="➖ Отменить друга", callback_data=f"game:{game_id}:cancel_friend"),
             ])
 
-    rows.append([
-        InlineKeyboardButton(text="⚙️ Управление", callback_data=f"admin:{game_id}:settings"),
-    ])
+    if not rows:
+        return None
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
