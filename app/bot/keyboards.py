@@ -51,7 +51,10 @@ def admin_game_keyboard(game_id: str, *, friends_allowed: bool, status: str) -> 
             InlineKeyboardButton(text="⏱ Длительность", callback_data=f"admin:{game_id}:edit_duration"),
             InlineKeyboardButton(text="👥 Таймер друзей", callback_data=f"admin:{game_id}:edit_friends_hours"),
         ],
-        [InlineKeyboardButton(text="📢 Публикация в группах", callback_data=f"admin:{game_id}:broadcast_menu")],
+        [
+            InlineKeyboardButton(text="📍 Локация", callback_data=f"admin:{game_id}:edit_location"),
+            InlineKeyboardButton(text="📢 Публикация в группах", callback_data=f"admin:{game_id}:broadcast_menu"),
+        ],
     ]
 
     if status not in {"game_started", "payment_collection"}:

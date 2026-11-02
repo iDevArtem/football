@@ -68,6 +68,7 @@ def serialize_game(game: dict, confirmed_count: int, reserve_count: int = 0) -> 
         "price": game.get("price", 0),
         "total_cost": game.get("total_cost"),
         "cancel_reason": game.get("cancel_reason"),
+        "location": game.get("location"),
         "linked_chats": [
             {"chat_id": m.get("chat_id"), "title": m.get("chat_title", "Чат")}
             for m in game.get("messages", [])

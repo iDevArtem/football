@@ -28,6 +28,7 @@ from app.bot.keyboards import (
 )
 from app.services.render import format_game_message, format_payments_message
 from app.utils.dates import parse_date_time, now_tz
+from app.utils.location import parse_location_input
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class AdminCardState(StatesGroup):
 
 class AdminEditState(StatesGroup):
     waiting_value = State()
+    waiting_location = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -375,6 +377,10 @@ async def new_game(message: Message) -> None:
     await UserRepository(db).upsert_from_telegram(message.from_user, is_admin=True)
     game_repo = GameRepository(db)
     chat_repo = ChatRepository(db)
+    settings_repo = SettingsRepository(db)
+
+    if "location" not in game_kwargs or not game_kwargs["location"]:
+        game_kwargs["location"] = await settings_repo.get_default_location()
 
     is_group = is_group_chat(message)
     chat_id = message.chat.id if is_group else None
@@ -392,8 +398,29 @@ async def new_game(message: Message) -> None:
             reply_markup=game_keyboard(game_id, False, game.get("status")),
             parse_mode="HTML",
         )
+        venue_msg_id = None
+        loc = game.get("location")
+        if loc and loc.get("latitude") is not None and loc.get("longitude") is not None:
+            try:
+                sent_venue = await message.bot.send_venue(
+                    chat_id=message.chat.id,
+                    latitude=loc["latitude"],
+                    longitude=loc["longitude"],
+                    title=loc.get("title", "Футбольное поле"),
+                    address=loc.get("address", ""),
+                )
+                venue_msg_id = sent_venue.message_id
+            except Exception as e:
+                logger.warning("Failed to send venue in chat %s: %s", message.chat.id, e)
+
         await game_repo.set_message_id(game_id, sent.message_id)
-        await game_repo.add_linked_message(game_id, message.chat.id, sent.message_id, message.chat.title or "Группа")
+        await game_repo.add_linked_message(
+            game_id,
+            message.chat.id,
+            sent.message_id,
+            message.chat.title or "Группа",
+            venue_message_id=venue_msg_id,
+        )
         await delete_message_safely(message)
     else:
         await message.answer(
@@ -804,6 +831,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         participants = await ParticipantRepository(db).list_by_game(game_id)
         text = format_game_message(fresh, participants)
         markup = game_keyboard(game_id, fresh.get("friends_allowed", False), fresh.get("status"))
+        loc = fresh.get("location")
         for chat in chats:
             cid = chat["chat_id"]
             if cid not in linked_ids:
@@ -814,7 +842,22 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
                         reply_markup=markup,
                         parse_mode="HTML",
                     )
-                    await game_repo.add_linked_message(game_id, cid, sent.message_id, chat.get("title", str(cid)))
+                    venue_msg_id = None
+                    if loc and loc.get("latitude") is not None and loc.get("longitude") is not None:
+                        try:
+                            sent_venue = await callback.bot.send_venue(
+                                chat_id=cid,
+                                latitude=loc["latitude"],
+                                longitude=loc["longitude"],
+                                title=loc.get("title", "Футбольное поле"),
+                                address=loc.get("address", ""),
+                            )
+                            venue_msg_id = sent_venue.message_id
+                        except Exception as e:
+                            logger.warning("Failed to send venue in chat %s: %s", cid, e)
+                    await game_repo.add_linked_message(
+                        game_id, cid, sent.message_id, chat.get("title", str(cid)), venue_message_id=venue_msg_id
+                    )
                 except (TelegramBadRequest, TelegramForbiddenError):
                     await chat_repo.set_active_status(cid, False)
         await render_broadcast_menu(callback.bot, callback.from_user.id, game_id, callback.message)
@@ -828,6 +871,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         chat_title = next((c.get("title", str(target_chat_id)) for c in chats if c["chat_id"] == target_chat_id), "Группа")
         fresh = await game_repo.get(game_id)
         participants = await ParticipantRepository(db).list_by_game(game_id)
+        loc = fresh.get("location")
         try:
             sent = await callback.bot.send_message(
                 chat_id=target_chat_id,
@@ -835,7 +879,22 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
                 reply_markup=game_keyboard(game_id, fresh.get("friends_allowed", False), fresh.get("status")),
                 parse_mode="HTML",
             )
-            await game_repo.add_linked_message(game_id, target_chat_id, sent.message_id, chat_title)
+            venue_msg_id = None
+            if loc and loc.get("latitude") is not None and loc.get("longitude") is not None:
+                try:
+                    sent_venue = await callback.bot.send_venue(
+                        chat_id=target_chat_id,
+                        latitude=loc["latitude"],
+                        longitude=loc["longitude"],
+                        title=loc.get("title", "Футбольное поле"),
+                        address=loc.get("address", ""),
+                    )
+                    venue_msg_id = sent_venue.message_id
+                except Exception as e:
+                    logger.warning("Failed to send venue in chat %s: %s", target_chat_id, e)
+            await game_repo.add_linked_message(
+                game_id, target_chat_id, sent.message_id, chat_title, venue_message_id=venue_msg_id
+            )
             await callback.answer(f"Опубликовано в {chat_title}")
         except (TelegramBadRequest, TelegramForbiddenError):
             await chat_repo.set_active_status(target_chat_id, False)
@@ -852,9 +911,32 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
                     await callback.bot.delete_message(chat_id=target_chat_id, message_id=m["message_id"])
                 except (TelegramBadRequest, TelegramForbiddenError):
                     pass
+                if m.get("venue_message_id"):
+                    try:
+                        await callback.bot.delete_message(chat_id=target_chat_id, message_id=m["venue_message_id"])
+                    except (TelegramBadRequest, TelegramForbiddenError):
+                        pass
         await game_repo.remove_linked_message(game_id, target_chat_id)
         await render_broadcast_menu(callback.bot, callback.from_user.id, game_id, callback.message)
         await callback.answer("Удалено из группы")
+        return
+
+    if action == "edit_location":
+        await state.set_state(AdminEditState.waiting_location)
+        await state.update_data(game_id=game_id, admin_message_id=callback.message.message_id)
+        prompt = (
+            "📍 <b>Укажите место проведения матча</b>\n\n"
+            "Вы можете:\n"
+            "1️⃣ Отправить <b>геопозицию</b> со стадионом через скрепку 📎 ➔ <i>Геопозиция</i>\n"
+            "2️⃣ Или ввести текстом:\n"
+            "<code>Название, Адрес, широта, долгота</code>\n\n"
+            "<i>Пример:</i>\n"
+            "<code>Арена Чемпион, ул. Полевая 5, 50.4501, 30.5234</code>\n"
+            "<i>Или просто координаты:</i>\n"
+            "<code>50.4501, 30.5234</code>"
+        )
+        await edit_admin_message(prompt, admin_game_keyboard(game_id, friends_allowed=game.get("friends_allowed", False), status=game.get("status")))
+        await callback.answer()
         return
 
     if action in {"edit_date", "edit_price", "edit_teams", "edit_players", "edit_duration", "edit_friends_hours"}:
@@ -1351,6 +1433,89 @@ async def admin_edit_value(message: Message, state: FSMContext) -> None:
             status=game.get("status"),
         ),
     )
+
+
+async def _apply_location_update(message: Message, state: FSMContext, loc: dict) -> None:
+    data = await state.get_data()
+    game_id = data.get("game_id")
+    if not game_id:
+        await state.clear()
+        return
+
+    db = get_db()
+    game_repo = GameRepository(db)
+    settings_repo = SettingsRepository(db)
+
+    await game_repo.update_location(game_id, loc)
+    await settings_repo.set_default_location(
+        title=loc.get("title", ""),
+        address=loc.get("address", ""),
+        latitude=loc["latitude"],
+        longitude=loc["longitude"],
+    )
+    await state.clear()
+
+    game = await game_repo.get(game_id)
+    await update_game_message(message.bot, game)
+    title_str = loc.get("title") or "Футбольное поле"
+    addr_str = f" ({loc['address']})" if loc.get("address") else ""
+    await message.answer(
+        f"✅ Локация сохранена и установлена по умолчанию:\n"
+        f"📍 <b>{title_str}</b>{addr_str}\n"
+        f"Координаты: <code>{loc['latitude']}, {loc['longitude']}</code>",
+        reply_markup=admin_game_keyboard(
+            game_id,
+            friends_allowed=game.get("friends_allowed", False),
+            status=game.get("status"),
+        ),
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdminEditState.waiting_location, F.venue)
+async def admin_edit_venue(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    loc = {
+        "title": message.venue.title or "Футбольное поле",
+        "address": message.venue.address or "",
+        "latitude": float(message.venue.location.latitude),
+        "longitude": float(message.venue.location.longitude),
+    }
+    await _apply_location_update(message, state, loc)
+
+
+@router.message(AdminEditState.waiting_location, F.location)
+async def admin_edit_location_pin(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    loc = {
+        "title": "Футбольное поле",
+        "address": "",
+        "latitude": float(message.location.latitude),
+        "longitude": float(message.location.longitude),
+    }
+    await _apply_location_update(message, state, loc)
+
+
+@router.message(AdminEditState.waiting_location, F.text)
+async def admin_edit_location_text(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    loc = parse_location_input(message.text)
+    if not loc:
+        await message.answer(
+            "❌ Не удалось разобрать координаты.\n\n"
+            "Отправьте геопозицию через скрепку 📎 или введите:\n"
+            "<code>Название, Адрес, широта, долгота</code>\n"
+            "(или <code>широта, долгота</code>)",
+            parse_mode="HTML",
+        )
+        return
+    await _apply_location_update(message, state, loc)
 
 
 @router.message(AdminCardState.waiting_card)

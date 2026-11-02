@@ -66,6 +66,11 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
         "",
         f"Статус: <b>{escape(status_text(status))}</b>",
     ]
+    loc = game.get("location")
+    if loc and (loc.get("title") or loc.get("address")):
+        title_part = escape(loc.get("title", ""))
+        addr_part = f" ({escape(loc.get('address', ''))})" if loc.get("address") else ""
+        lines.append(f"📍 Место: <b>{title_part}</b>{addr_part}")
     if status == "cancelled" and game.get("cancel_reason"):
         lines.append(f"Причина: <b>{escape(game['cancel_reason'])}</b>")
 

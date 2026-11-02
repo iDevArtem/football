@@ -18,6 +18,12 @@ interface GameSummary {
   friends_allowed: boolean;
   price: number;
   duration_minutes: number;
+  location?: {
+    title?: string;
+    address?: string;
+    latitude?: number;
+    longitude?: number;
+  };
   linked_chats: { chat_id: number; title: string }[];
 }
 
@@ -146,6 +152,26 @@ export function PublicSchedule({ onGoToCabinet }: { onGoToCabinet: (gameId?: str
                         </span>
                       </div>
                       <h4 className="text-lg font-bold text-white">{g.title}</h4>
+                      {g.location && (g.location.title || g.location.address) && (
+                        <div className="flex items-center gap-1.5 text-xs text-slate-300 mt-1">
+                          <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>
+                            <strong className="text-white">{g.location.title || "Стадион"}</strong>
+                            {g.location.address ? ` (${g.location.address})` : ""}
+                          </span>
+                          {g.location.latitude && g.location.longitude && (
+                            <a
+                              href={`https://maps.google.com/?q=${g.location.latitude},${g.location.longitude}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="ml-1.5 inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 underline"
+                            >
+                              На карте
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-4 text-xs font-medium text-slate-300">

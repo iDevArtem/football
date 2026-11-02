@@ -21,7 +21,8 @@ class GameRepository:
                           price: int = 0, duration_minutes: int = 90,
                           friends_open_after_hours: int = 6,
                           hourly_rate: int = 600, max_players: int | None = None,
-                          chat_id: int | None = None) -> dict:
+                          chat_id: int | None = None,
+                          location: dict | None = None) -> dict:
         calculated_max = max_players if max_players is not None else (teams_count * players_per_team)
         now = datetime.now(timezone.utc)
         friends_after = now + timedelta(hours=friends_open_after_hours)
@@ -31,6 +32,7 @@ class GameRepository:
             "messages": [],
             "title": title,
             "start_at": start_at,
+            "location": location,
             "teams_count": teams_count,
             "players_per_team": players_per_team,
             "max_players": calculated_max,
@@ -53,21 +55,31 @@ class GameRepository:
         doc["_id"] = result.inserted_id
         return doc
 
-    async def add_linked_message(self, game_id: str, chat_id: int, message_id: int, chat_title: str) -> None:
+    async def add_linked_message(self, game_id: str, chat_id: int, message_id: int, chat_title: str, venue_message_id: int | None = None) -> None:
         now = datetime.now(timezone.utc)
+        msg_entry = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "chat_title": chat_title,
+            "added_at": now,
+        }
+        if venue_message_id is not None:
+            msg_entry["venue_message_id"] = venue_message_id
+
         await self.db.games.update_one(
             {"_id": ObjectId(game_id)},
             {
                 "$push": {
-                    "messages": {
-                        "chat_id": chat_id,
-                        "message_id": message_id,
-                        "chat_title": chat_title,
-                        "added_at": now,
-                    }
+                    "messages": msg_entry
                 },
                 "$set": {"updated_at": now},
             }
+        )
+
+    async def update_location(self, game_id: str, location: dict | None) -> None:
+        await self.db.games.update_one(
+            {"_id": ObjectId(game_id)},
+            {"$set": {"location": location, "updated_at": datetime.now(timezone.utc)}}
         )
 
     async def remove_linked_message(self, game_id: str, chat_id: int, message_id: int | None = None) -> None:

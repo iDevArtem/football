@@ -8,7 +8,7 @@ import { RosterList, Participant } from "../components/RosterList";
 import { FriendsModal } from "../components/FriendsModal";
 import { PaymentBox } from "../components/PaymentBox";
 import { AdminControls } from "../components/AdminControls";
-import { CheckCircle2, Clock, UserPlus, XCircle, Shield, AlertCircle, LogIn, RefreshCw } from "lucide-react";
+import { CheckCircle2, Clock, UserPlus, XCircle, Shield, AlertCircle, LogIn, RefreshCw, MapPin, ExternalLink } from "lucide-react";
 
 interface CabinetPageProps {
   initialGameId?: string | null;
@@ -300,6 +300,26 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
                 </span>
                 <h3 className="text-xl font-extrabold text-white">{game.title}</h3>
                 <p className="text-xs text-emerald-400 font-medium mt-0.5">{game.format_description}</p>
+                {game.location && (game.location.title || game.location.address) && (
+                  <div className="flex items-center gap-1.5 text-xs text-slate-300 mt-2">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>
+                      <strong className="text-white">{game.location.title || "Стадион"}</strong>
+                      {game.location.address ? ` (${game.location.address})` : ""}
+                    </span>
+                    {game.location.latitude && game.location.longitude && (
+                      <a
+                        href={`https://maps.google.com/?q=${game.location.latitude},${game.location.longitude}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ml-1.5 inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 underline"
+                      >
+                        На карте
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Status Badge */}
