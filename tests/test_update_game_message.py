@@ -51,6 +51,38 @@ class TestUpdateGameMessage(unittest.IsolatedAsyncioTestCase):
         called_chat_ids = {call.kwargs["chat_id"] for call in bot.edit_message_text.call_args_list}
         self.assertEqual(called_chat_ids, {-1001, -1002, -1003})
 
+    @patch("app.bot.handlers.get_db")
+    async def test_update_game_message_updates_private_chat_and_group(self, mock_get_db):
+        db = MagicMock()
+        db.participants.find = MagicMock(return_value=MagicMock(sort=MagicMock(return_value=AsyncIterator([]))))
+        mock_get_db.return_value = db
+        
+        bot = MagicMock()
+        bot.edit_message_text = AsyncMock()
+        
+        game_id = "64a8b79f2e3d4c5b6a7b8c9d"
+        game = {
+            "_id": ObjectId(game_id),
+            "title": "Футбол",
+            "start_at": MagicMock(strftime=lambda fmt: "17:00" if "%H" in fmt else "06.11.2026"),
+            "teams_count": 3,
+            "players_per_team": 5,
+            "max_players": 15,
+            "price": 0,
+            "status": "registration_open",
+            "friends_allowed": False,
+            "messages": [
+                {"chat_id": 777, "message_id": 100, "chat_title": "Личные сообщения"},
+                {"chat_id": -100123456, "message_id": 200, "chat_title": "PlayGameGroup"},
+            ]
+        }
+        
+        await update_game_message(bot, game)
+        
+        self.assertEqual(bot.edit_message_text.call_count, 2)
+        called_chat_ids = {call.kwargs["chat_id"] for call in bot.edit_message_text.call_args_list}
+        self.assertEqual(called_chat_ids, {777, -100123456})
+
 
 if __name__ == "__main__":
     unittest.main()

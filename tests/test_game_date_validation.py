@@ -79,6 +79,7 @@ async def test_new_game_accepts_future_date():
 
         game_repo = MagicMock()
         game_repo.create_game = AsyncMock(return_value=mock_game)
+        game_repo.add_linked_message = AsyncMock()
         mock_game_cls.return_value = game_repo
 
         await new_game(message)

@@ -243,7 +243,7 @@ async def send_private_admin_menu(bot, user_id: int, game: dict):
         bot,
         user_id,
         "⚙️ Управление игрой\n\n"
-        "Все действия выполняются здесь, а в группе обновляется только основное сообщение игры.",
+        "Все действия выполняются здесь, а в карточке игры и группах данные обновляются автоматически.",
         reply_markup=admin_game_keyboard(
             game_id,
             friends_allowed=game.get("friends_allowed", False),
@@ -466,14 +466,24 @@ async def new_game(message: Message) -> None:
         )
         await delete_message_safely(message)
     else:
-        await send_game_message(
+        sent = await send_game_message(
             message.bot,
             message.from_user.id,
             game,
             [],
+            reply_markup=markup,
             link_preview_options=link_preview,
             message=message,
         )
+        if sent and hasattr(sent, "message_id"):
+            res = game_repo.add_linked_message(
+                game_id,
+                message.from_user.id,
+                sent.message_id,
+                "Личные сообщения",
+            )
+            if hasattr(res, "__await__"):
+                await res
         await render_broadcast_menu(message.bot, message.from_user.id, game_id)
 
 
@@ -828,7 +838,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         fresh = await game_repo.get(game_id)
         text = (
             "⚙️ Управление игрой\n\n"
-            "Все действия выполняются здесь, а в группе обновляется только основное сообщение игры."
+            "Все действия выполняются здесь, а в карточке игры и группах данные обновляются автоматически."
         )
         markup = admin_markup(fresh)
         is_group_message = callback.message and callback.message.chat.type in ("group", "supergroup")
