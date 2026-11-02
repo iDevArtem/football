@@ -83,5 +83,5 @@ async def test_auth_config_endpoint():
         res = await client.get("/api/auth/config")
         assert res.status_code == 200
         data = res.json()
-        assert "bot_username" in data
+        assert data["bot_username"] == "mini_football_robot"
         assert "webapp_url" in data

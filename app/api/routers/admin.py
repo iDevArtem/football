@@ -1,10 +1,12 @@
 import math
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Depends, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from bson import ObjectId
 
+from app.config.settings import get_settings
 from app.db.mongo import get_db
 from app.repositories.games import GameRepository
 from app.repositories.participants import ParticipantRepository
@@ -20,6 +22,17 @@ from app.bot.handlers import update_game_message
 router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin)])
 
 
+def _validate_future_datetime(v: datetime | None, err_msg: str = "Нельзя создать игру в прошлом") -> datetime | None:
+    if v is None:
+        return v
+    tz_name = get_settings().default_timezone
+    now = datetime.now(timezone.utc)
+    v_utc = v if v.tzinfo else v.replace(tzinfo=ZoneInfo(tz_name))
+    if v_utc.astimezone(timezone.utc) < now:
+        raise ValueError(err_msg)
+    return v
+
+
 class CreateGameRequest(BaseModel):
     title: str = "⚽ Футбол 5х5"
     start_at: datetime
@@ -27,6 +40,11 @@ class CreateGameRequest(BaseModel):
     hourly_rate: int = 600
     duration_minutes: int = 90
     friends_open_after_hours: int = 6
+
+    @field_validator("start_at")
+    @classmethod
+    def validate_start_at(cls, v: datetime) -> datetime:
+        return _validate_future_datetime(v, "Нельзя создать игру в прошлом")
 
 
 class EditGameRequest(BaseModel):
@@ -36,6 +54,11 @@ class EditGameRequest(BaseModel):
     hourly_rate: Optional[int] = None
     duration_minutes: Optional[int] = None
     friends_open_after_hours: Optional[int] = None
+
+    @field_validator("start_at")
+    @classmethod
+    def validate_start_at(cls, v: Optional[datetime]) -> Optional[datetime]:
+        return _validate_future_datetime(v, "Нельзя перенести игру в прошлое")
 
 
 class CancelGameRequest(BaseModel):

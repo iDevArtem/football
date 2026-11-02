@@ -22,6 +22,11 @@ class TelegramUserObj:
         self.last_name = d.get("last_name")
         self.username = d.get("username")
 
+    @property
+    def full_name(self) -> str:
+        parts = [p.strip() for p in (self.first_name, self.last_name) if p and p.strip()]
+        return " ".join(parts)
+
 
 @router.post("/tma")
 async def login_tma(
@@ -49,6 +54,7 @@ async def login_tma(
         "sub": str(tg_user.id),
         "telegram_id": tg_user.id,
         "first_name": tg_user.first_name,
+        "last_name": tg_user.last_name,
         "username": tg_user.username,
         "role": role,
     }
@@ -89,6 +95,7 @@ async def login_widget(
         "sub": str(tg_user.id),
         "telegram_id": tg_user.id,
         "first_name": tg_user.first_name,
+        "last_name": tg_user.last_name,
         "username": tg_user.username,
         "role": role,
     }
@@ -109,6 +116,15 @@ async def login_widget(
 
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)):
+    if "last_name" not in user:
+        try:
+            db = get_db()
+            user_repo = UserRepository(db)
+            user_doc = await user_repo.get_by_telegram_id(user["telegram_id"])
+            if user_doc:
+                user["last_name"] = user_doc.get("last_name")
+        except Exception:
+            pass
     return user
 
 

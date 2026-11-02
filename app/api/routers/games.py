@@ -8,6 +8,7 @@ from app.db.mongo import get_db
 from app.repositories.games import GameRepository
 from app.repositories.participants import ParticipantRepository
 from app.repositories.payments import PaymentRepository
+from app.repositories.users import UserRepository
 from app.api.dependencies import get_current_user, get_optional_user
 from app.api.sync import trigger_sync
 from app.services.render import dynamic_format_text, status_text
@@ -19,11 +20,22 @@ router = APIRouter(tags=["games"])
 
 
 class UserProxy:
-    def __init__(self, telegram_id: int, first_name: str, username: str | None = None):
+    def __init__(
+        self,
+        telegram_id: int,
+        first_name: str,
+        username: str | None = None,
+        last_name: str | None = None,
+    ):
         self.id = telegram_id
         self.first_name = first_name
         self.username = username
-        self.full_name = first_name
+        self.last_name = last_name
+
+    @property
+    def full_name(self) -> str:
+        parts = [p.strip() for p in (self.first_name, self.last_name) if p and p.strip()]
+        return " ".join(parts)
 
 
 class FriendRequest(BaseModel):
@@ -145,6 +157,7 @@ async def join_game(
     db = get_db()
     game_repo = GameRepository(db)
     part_repo = ParticipantRepository(db)
+    user_repo = UserRepository(db)
 
     game = await game_repo.get_by_id(game_id)
     if not game:
@@ -153,10 +166,27 @@ async def join_game(
     if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
+    first_name = user.get("first_name", "")
+    last_name = user.get("last_name")
+    username = user.get("username")
+
+    if last_name is None:
+        try:
+            user_doc = await user_repo.get_by_telegram_id(user["telegram_id"])
+            if user_doc:
+                last_name = user_doc.get("last_name")
+                if not first_name:
+                    first_name = user_doc.get("first_name", "")
+                if not username:
+                    username = user_doc.get("username")
+        except Exception:
+            pass
+
     tg_user = UserProxy(
         telegram_id=user["telegram_id"],
-        first_name=user.get("first_name", ""),
-        username=user.get("username"),
+        first_name=first_name,
+        username=username,
+        last_name=last_name,
     )
 
     participant = await part_repo.join_player(game, tg_user)
@@ -190,10 +220,15 @@ async def leave_game(
     if game.get("status") in {"cancelled", "closed", "registration_closed", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
+    first_name = user.get("first_name", "")
+    last_name = user.get("last_name")
+    username = user.get("username")
+
     tg_user = UserProxy(
         telegram_id=user["telegram_id"],
-        first_name=user.get("first_name", ""),
-        username=user.get("username"),
+        first_name=first_name,
+        username=username,
+        last_name=last_name,
     )
 
     await part_repo.decline_player(game_id, tg_user)

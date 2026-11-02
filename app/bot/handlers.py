@@ -25,7 +25,7 @@ from app.bot.keyboards import (
     payment_duration_keyboard,
 )
 from app.services.render import format_game_message, format_payments_message
-from app.utils.dates import parse_date_time
+from app.utils.dates import parse_date_time, now_tz
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -359,6 +359,10 @@ async def new_game(message: Message) -> None:
         )
         return
 
+    if game_kwargs["start_at"] < now_tz(get_settings().default_timezone):
+        await message.reply("❌ Нельзя создать игру в прошлом.")
+        return
+
     db = get_db()
     await UserRepository(db).upsert_from_telegram(message.from_user, is_admin=True)
     game_repo = GameRepository(db)
@@ -511,12 +515,15 @@ async def edit_date(message: Message) -> None:
         return
     parts = message.text.split()
     if len(parts) != 3:
-        await message.reply("Формат: <code>/edit_date 2026-06-19 20:00</code>", parse_mode="HTML")
+        await message.reply("Формат: <code>/edit_date 2026-11-06 19:00</code>", parse_mode="HTML")
         return
     try:
         start_at = parse_date_time(parts[1], parts[2], get_settings().default_timezone)
     except Exception:
         await message.reply("❌ Не смог разобрать дату и время.")
+        return
+    if start_at < now_tz(get_settings().default_timezone):
+        await message.reply("❌ Нельзя перенести игру в прошлое.")
         return
     db = get_db()
     game_repo = GameRepository(db)
@@ -755,7 +762,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
 
     if action in {"edit_date", "edit_price", "edit_teams", "edit_players"}:
         prompts = {
-            "edit_date": "📅 Введите новую дату и время:\n<code>2026-06-19 20:00</code>",
+            "edit_date": "📅 Введите новую дату и время:\n<code>2026-11-06 19:00</code>",
             "edit_price": "💰 Введите новую цену числом:\n<code>250</code>",
             "edit_teams": "👥 Введите количество команд:\n<code>3</code>",
             "edit_players": "🏃 Введите игроков в команде:\n<code>6</code>",
@@ -1132,6 +1139,9 @@ async def admin_edit_value(message: Message, state: FSMContext) -> None:
             if len(parts) != 2:
                 raise ValueError
             start_at = parse_date_time(parts[0], parts[1], get_settings().default_timezone)
+            if start_at < now_tz(get_settings().default_timezone):
+                await message.answer("❌ Нельзя перенести игру в прошлое. Попробуй еще раз.")
+                return
             await game_repo.update_start_at(game_id, start_at)
             ok_text = "✅ Дата и время изменены."
         elif edit_action == "edit_price":

@@ -7,7 +7,7 @@ interface AppConfig {
 }
 
 const DEFAULT_CONFIG: AppConfig = {
-  bot_username: (import.meta as any).env?.VITE_BOT_USERNAME || "PlayGame_robot",
+  bot_username: (import.meta as any).env?.VITE_BOT_USERNAME || "mini_football_robot",
   webapp_url: "https://football.idev.wtf",
 };
 

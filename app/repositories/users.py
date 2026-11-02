@@ -22,3 +22,6 @@ class UserRepository:
             upsert=True,
         )
         return await self.db.users.find_one({"telegram_id": tg_user.id})
+
+    async def get_by_telegram_id(self, telegram_id: int) -> dict | None:
+        return await self.db.users.find_one({"telegram_id": telegram_id})

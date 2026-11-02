@@ -22,6 +22,7 @@ def test_settings_defaults(monkeypatch):
     from app.config.settings import Settings
     s = Settings(_env_file="nonexistent")
     assert s.bot_token == ""
+    assert s.bot_username == "mini_football_robot"
     assert s.mongo_url == "mongodb://localhost:27017"
     assert s.mongo_db_name == "football_bot"
     assert s.default_timezone == "Europe/Kyiv"
