@@ -297,4 +297,6 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
             self.assertIn("link_preview_options", call_kwargs)
             preview_opt = call_kwargs["link_preview_options"]
             self.assertFalse(preview_opt.is_disabled)
+            self.assertTrue(preview_opt.prefer_small_media)
+            self.assertFalse(preview_opt.prefer_large_media)
             self.assertEqual(preview_opt.url, "https://maps.google.com/?q=50.45,30.52")

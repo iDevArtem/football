@@ -85,7 +85,8 @@ def get_game_link_preview_options(game: dict) -> LinkPreviewOptions:
         return LinkPreviewOptions(
             is_disabled=False,
             url=map_url,
-            prefer_large_media=True,
+            prefer_small_media=True,
+            prefer_large_media=False,
             show_above_text=False,
         )
     return LinkPreviewOptions(is_disabled=True)
