@@ -1,5 +1,6 @@
 import unittest
-from app.bot.keyboards import broadcast_groups_keyboard, admin_game_keyboard
+from bson import ObjectId
+from app.bot.keyboards import broadcast_groups_keyboard, admin_game_keyboard, friends_cancel_keyboard
 
 
 class TestKeyboards(unittest.TestCase):
@@ -32,6 +33,20 @@ class TestKeyboards(unittest.TestCase):
         kb = admin_game_keyboard(game_id, friends_allowed=False, status="registration_open")
         callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row]
         self.assertIn(f"admin:{game_id}:broadcast_menu", callbacks)
+
+    def test_friends_cancel_keyboard_under_64_bytes(self):
+        game_id = str(ObjectId())
+        friends = [
+            {"_id": ObjectId(), "display_name": "Друг 1"},
+            {"_id": ObjectId(), "display_name": "Друг 2"},
+        ]
+        kb = friends_cancel_keyboard(game_id, friends)
+        for row in kb.inline_keyboard:
+            for btn in row:
+                cb_bytes = len(btn.callback_data.encode("utf-8"))
+                self.assertLessEqual(cb_bytes, 64)
+                # Ensure it's well under the limit (e.g. <= 35 bytes)
+                self.assertLessEqual(cb_bytes, 35)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ from app.bot.keyboards import (
     card_confirmation_keyboard,
 )
 from app.services.render import format_game_message, format_payments_message
+from app.services.rich_message import send_game_message, edit_game_message
 from app.utils.dates import parse_date_time, now_tz
 from app.utils.location import parse_location_input
 
@@ -89,19 +90,36 @@ async def _update_single_message(
     game_id: str,
     chat_id: int,
     message_id: int,
-    text: str,
-    reply_markup,
+    text: str | None = None,
+    reply_markup=None,
     link_preview_options: LinkPreviewOptions | None = None,
+    game: dict | None = None,
+    participants: list[dict] | None = None,
+    payments: list[dict] | None = None,
 ) -> None:
     try:
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode="HTML",
-            link_preview_options=link_preview_options,
-        )
+        if game is not None:
+            await edit_game_message(
+                bot=bot,
+                chat_id=chat_id,
+                message_id=message_id,
+                game=game,
+                participants=participants or [],
+                payments=payments,
+                reply_markup=reply_markup,
+                link_preview_options=link_preview_options,
+            )
+        else:
+            res = bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text or "",
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+                link_preview_options=link_preview_options,
+            )
+            if hasattr(res, "__await__"):
+                await res
     except TelegramBadRequest as e:
         err_text = str(e).lower()
         if "not modified" in err_text:
@@ -147,7 +165,20 @@ async def update_game_message(bot, game: dict) -> None:
     chat_repo = ChatRepository(db)
     import asyncio
     tasks = [
-        _update_single_message(bot, game_repo, chat_repo, game_id, m["chat_id"], m["message_id"], text, reply_markup, link_preview)
+        _update_single_message(
+            bot,
+            game_repo,
+            chat_repo,
+            game_id,
+            m["chat_id"],
+            m["message_id"],
+            text=text,
+            reply_markup=reply_markup,
+            link_preview_options=link_preview,
+            game=game,
+            participants=participants,
+            payments=payments,
+        )
         for m in messages
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -417,11 +448,14 @@ async def new_game(message: Message) -> None:
 
     if is_group:
         await chat_repo.upsert_chat(message.chat.id, message.chat.title or "Группа", message.chat.type)
-        sent = await message.answer(
-            format_game_message(game, []),
+        sent = await send_game_message(
+            message.bot,
+            message.chat.id,
+            game,
+            [],
             reply_markup=markup,
-            parse_mode="HTML",
             link_preview_options=link_preview,
+            message=message,
         )
         await game_repo.set_message_id(game_id, sent.message_id)
         await game_repo.add_linked_message(
@@ -432,10 +466,13 @@ async def new_game(message: Message) -> None:
         )
         await delete_message_safely(message)
     else:
-        await message.answer(
-            format_game_message(game, []),
-            parse_mode="HTML",
+        await send_game_message(
+            message.bot,
+            message.from_user.id,
+            game,
+            [],
             link_preview_options=link_preview,
+            message=message,
         )
         await render_broadcast_menu(message.bot, message.from_user.id, game_id)
 
@@ -851,11 +888,12 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             cid = chat["chat_id"]
             if cid not in linked_ids:
                 try:
-                    sent = await callback.bot.send_message(
-                        chat_id=cid,
-                        text=text,
+                    sent = await send_game_message(
+                        callback.bot,
+                        cid,
+                        fresh,
+                        participants,
                         reply_markup=markup,
-                        parse_mode="HTML",
                         link_preview_options=link_preview,
                     )
                     await game_repo.add_linked_message(game_id, cid, sent.message_id, chat.get("title", str(cid)))
@@ -873,16 +911,17 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         fresh = await game_repo.get(game_id)
         participants = await ParticipantRepository(db).list_by_game(game_id)
         try:
-            sent = await callback.bot.send_message(
-                chat_id=target_chat_id,
-                text=format_game_message(fresh, participants),
+            sent = await send_game_message(
+                callback.bot,
+                target_chat_id,
+                fresh,
+                participants,
                 reply_markup=game_keyboard(
                     game_id,
                     fresh.get("friends_allowed", False),
                     fresh.get("status"),
                     location=fresh.get("location"),
                 ),
-                parse_mode="HTML",
                 link_preview_options=get_game_link_preview_options(fresh),
             )
             await game_repo.add_linked_message(game_id, target_chat_id, sent.message_id, chat_title)
@@ -1041,7 +1080,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         rec = card_details.get("recipient") or ""
         rec_str = f" ({rec})" if rec else ""
         await edit_admin_message(
-            f"⏱ Длительность: <b>{minutes} мин</b>\n\n"
+            f"⏱️ Длительность: <b>{minutes} мин</b>\n\n"
             f"💳 <b>Реквизиты для оплаты:</b>\n"
             f"Номер: <code>{card_num}</code>{rec_str}\n\n"
             f"Использовать эту карту или ввести другую?",
@@ -1226,14 +1265,14 @@ async def game_callback(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
 
-@router.callback_query(F.data.startswith("friend:"))
+@router.callback_query(F.data.startswith("friend:") | F.data.startswith("fc:") | F.data.startswith("fc_back:"))
 async def friend_callback(callback: CallbackQuery) -> None:
     parts = callback.data.split(":")
     db = get_db()
     game_repo = GameRepository(db)
     participants_repo = ParticipantRepository(db)
 
-    if len(parts) == 3 and parts[2] == "back":
+    if (len(parts) == 3 and parts[2] == "back") or callback.data.startswith("fc_back:"):
         game_id = parts[1]
         game = await game_repo.get(game_id)
         if game:
@@ -1245,11 +1284,19 @@ async def friend_callback(callback: CallbackQuery) -> None:
         await callback.answer()
         return
 
-    if len(parts) != 4 or parts[3] != "cancel":
+    if callback.data.startswith("fc:"):
+        friend_id = parts[1]
+        friend = await participants_repo.get(friend_id)
+        if not friend:
+            await callback.answer("Друг не найден", show_alert=True)
+            return
+        game_id = str(friend["game_id"])
+    elif len(parts) == 4 and parts[3] == "cancel":
+        _, game_id, friend_id, _ = parts
+    else:
         await callback.answer("Некорректное действие", show_alert=True)
         return
 
-    _, game_id, friend_id, _ = parts
     game = await game_repo.get(game_id)
     if not game:
         await callback.answer("Игра не найдена", show_alert=True)

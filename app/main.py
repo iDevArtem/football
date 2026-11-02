@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    if settings.is_default_jwt_secret and settings.bot_token and not settings.bot_token.startswith("test"):
+        logger.warning(
+            "CRITICAL SECURITY WARNING: Default JWT_SECRET is used! Please configure a secure JWT_SECRET in .env."
+        )
+
     logger.info("Initializing MongoDB...")
     try:
         await init_mongo()
@@ -112,7 +117,22 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "app": "football_bot"}
+    db_connected = False
+    try:
+        from app.db.mongo import get_db
+        db = get_db()
+        cmd_res = db.command("ping")
+        if hasattr(cmd_res, "__await__"):
+            await cmd_res
+        db_connected = True
+    except Exception:
+        db_connected = False
+
+    return {
+        "status": "ok",
+        "app": "football_bot",
+        "database": "connected" if db_connected else "disconnected",
+    }
 
 # API Routers
 app.include_router(auth_router, prefix="/api/auth")

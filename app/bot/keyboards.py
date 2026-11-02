@@ -59,7 +59,7 @@ def admin_game_keyboard(game_id: str, *, friends_allowed: bool, status: str) -> 
             InlineKeyboardButton(text="🏃 Игроки", callback_data=f"admin:{game_id}:edit_players"),
         ],
         [
-            InlineKeyboardButton(text="⏱ Длительность", callback_data=f"admin:{game_id}:edit_duration"),
+            InlineKeyboardButton(text="⏱️ Длительность", callback_data=f"admin:{game_id}:edit_duration"),
             InlineKeyboardButton(text="👥 Таймер друзей", callback_data=f"admin:{game_id}:edit_friends_hours"),
         ],
         [
@@ -164,10 +164,10 @@ def friends_cancel_keyboard(game_id: str, friends: list[dict]) -> InlineKeyboard
         rows.append([
             InlineKeyboardButton(
                 text=f"➖ {friend['display_name']}",
-                callback_data=f"friend:{game_id}:{friend['_id']}:cancel",
+                callback_data=f"fc:{friend['_id']}",
             )
         ])
-    rows.append([InlineKeyboardButton(text="Назад", callback_data=f"friend:{game_id}:back")])
+    rows.append([InlineKeyboardButton(text="Назад", callback_data=f"fc_back:{game_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

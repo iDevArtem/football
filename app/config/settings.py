@@ -25,6 +25,10 @@ class Settings(BaseSettings):
                 result.add(int(raw))
         return result
 
+    @property
+    def is_default_jwt_secret(self) -> bool:
+        return self.jwt_secret == "change-me-secret-key-32-chars-minimum-length!"
+
 
 @lru_cache
 def get_settings() -> Settings:

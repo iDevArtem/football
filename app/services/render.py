@@ -61,17 +61,8 @@ def dynamic_format_text(confirmed_count: int, max_players: int = 15, clean: bool
     return f"🔥 Состав набран ({max_players} чел, резерв {confirmed_count - max_players})"
 
 
-def format_game_message(game: dict, participants: list[dict], payments: list[dict] | None = None) -> str:
+def format_game_header(game: dict, confirmed_count: int) -> str:
     status = game.get("status", "registration_open")
-
-    confirmed = [p for p in participants if p["status"] == "confirmed"]
-    reserve = [p for p in participants if p["status"] == "reserve"]
-    declined = [p for p in participants if p["status"] == "declined"]
-
-    payment_by_participant_id = {}
-    if payments:
-        payment_by_participant_id = {str(p["participant_id"]): p for p in payments}
-
     start_at = game["start_at"]
     date_text = start_at.strftime("%d.%m.%Y")
     time_text = start_at.strftime("%H:%M")
@@ -88,16 +79,13 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
     max_players = game.get("max_players", 15)
     hourly_rate = game.get("hourly_rate", 600)
     duration_min = game.get("duration_minutes", 90)
-    duration_hours = round(duration_min / 60, 1)
-    if duration_hours.is_integer():
-        duration_hours = int(duration_hours)
 
-    clean_format = dynamic_format_text(len(confirmed), max_players, clean=True)
+    clean_format = dynamic_format_text(confirmed_count, max_players, clean=True)
 
     lines += [
         f"📅 Дата: <b>{date_text}</b>",
         f"⏰ Время: <b>{time_text}</b>",
-        f"⏱ Длительность: <b>{duration_min} мин</b>",
+        f"⏱️ Длительность: <b>{duration_min} мин</b>",
         f"🎮 Формат: <b>{clean_format}</b>",
     ]
 
@@ -108,25 +96,39 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
     else:
         lines.append(f"💰 Аренда поля: <b>{hourly_rate} грн/час</b>")
 
-    # RichBlockMap между описанием и составом
+    return "\n".join(lines).strip()
+
+
+def format_game_location_fallback(game: dict) -> str | None:
     loc = game.get("location")
-    if loc and (loc.get("title") or loc.get("latitude") is not None):
-        title_str = escape(loc.get("title") or "Футбольное поле")
-        addr_str = escape(loc.get("address") or "")
-        has_coords = loc.get("latitude") is not None and loc.get("longitude") is not None
-        map_url = f"https://maps.google.com/?q={loc['latitude']},{loc['longitude']}" if has_coords else None
+    if not loc or not (loc.get("title") or loc.get("latitude") is not None):
+        return None
+    title_str = escape(loc.get("title") or "Футбольное поле")
+    addr_str = escape(loc.get("address") or "")
+    has_coords = loc.get("latitude") is not None and loc.get("longitude") is not None
+    map_url = f"https://maps.google.com/?q={loc['latitude']},{loc['longitude']}" if has_coords else None
 
-        lines.append("")
-        lines.append("🗺 <b>Локация и навигация:</b>")
-        quote_parts = [f"📍 <b>{title_str}</b>"]
-        if addr_str:
-            quote_parts.append(f"📮 {addr_str}")
-        if map_url:
-            quote_parts.append(f"🚗 <a href=\"{map_url}\">Открыть на карте (Google Maps)</a>")
-        lines.append(f"<blockquote>{chr(10).join(quote_parts)}</blockquote>")
+    quote_parts = [f"📍 <b>{title_str}</b>"]
+    if addr_str:
+        quote_parts.append(f"📮 {addr_str}")
+    if map_url:
+        quote_parts.append(f"🚗 <a href=\"{map_url}\">Открыть на карте (Google Maps)</a>")
+    return f"🗺 <b>Локация и навигация:</b>\n<blockquote>{chr(10).join(quote_parts)}</blockquote>"
 
-    lines += [
-        "",
+
+def format_game_roster(game: dict, participants: list[dict], payments: list[dict] | None = None) -> str:
+    status = game.get("status", "registration_open")
+    max_players = game.get("max_players", 15)
+
+    confirmed = [p for p in participants if p["status"] == "confirmed"]
+    reserve = [p for p in participants if p["status"] == "reserve"]
+    declined = [p for p in participants if p["status"] == "declined"]
+
+    payment_by_participant_id = {}
+    if payments:
+        payment_by_participant_id = {str(p["participant_id"]): p for p in payments}
+
+    lines = [
         f"👥 Основной состав: <b>{len(confirmed)} / {max_players}</b>",
         f"🟡 Резерв: <b>{len(reserve)}</b>",
         "",
@@ -197,20 +199,73 @@ def format_game_message(game: dict, participants: list[dict], payments: list[dic
     elif status == "registration_closed":
         lines.append("Запись закрыта админом.")
 
-    # details summary (Telegram expandable blockquote в самом низу)
-    full_dynamic = dynamic_format_text(len(confirmed), max_players, clean=False)
-    summary_lines = [
-        "ℹ️ <b>Информация об игре и боте:</b>",
-        f"• Формат: {full_dynamic}",
-        f"• 💰 Аренда поля: {hourly_rate} грн/час (делится на всех пришедших)",
-        f"• ⏱ Длительность: {duration_min} мин ({duration_hours} ч)",
-        "• 🔄 Резерв: автоматический переход в основу при отказе участника",
-        "• 🤖 Бот: автоматическая запись, очереди и расчет оплат",
-    ]
-    lines.append("")
-    lines.append(f"<blockquote expandable>{chr(10).join(summary_lines)}</blockquote>")
-
     return "\n".join(lines).strip()
+
+
+def format_game_message(game: dict, participants: list[dict], payments: list[dict] | None = None) -> str:
+    confirmed = [p for p in participants if p["status"] == "confirmed"]
+    header = format_game_header(game, len(confirmed))
+    loc_part = format_game_location_fallback(game)
+    roster = format_game_roster(game, participants, payments)
+
+    parts = [header]
+    if loc_part:
+        parts.append(loc_part)
+    parts.append(roster)
+    return "\n\n".join(parts).strip()
+
+
+def format_game_rich_blocks(game: dict, participants: list[dict], payments: list[dict] | None = None) -> list[dict] | None:
+    loc = game.get("location")
+    if not loc or loc.get("latitude") is None or loc.get("longitude") is None:
+        return None
+
+    confirmed = [p for p in participants if p["status"] == "confirmed"]
+    header_parts = [format_game_header(game, len(confirmed))]
+    title_str = escape(loc.get("title") or "Футбольное поле")
+    addr_str = escape(loc.get("address") or "")
+    loc_desc = f"📍 <b>{title_str}</b>" + (f" ({addr_str})" if addr_str else "")
+    header_parts.append(f"🗺 <b>Локация:</b>\n{loc_desc}")
+
+    header_text = "\n\n".join(header_parts)
+    roster_text = format_game_roster(game, participants, payments)
+
+    map_block = {
+        "type": "map",
+        "location": {
+            "latitude": float(loc["latitude"]),
+            "longitude": float(loc["longitude"]),
+        },
+        "zoom": 15,
+        "width": 600,
+        "height": 260,
+    }
+    return [
+        {"type": "paragraph", "text": header_text},
+        map_block,
+        {"type": "paragraph", "text": roster_text},
+    ]
+
+
+def format_game_rich_html(game: dict, participants: list[dict], payments: list[dict] | None = None) -> str | None:
+    loc = game.get("location")
+    if not loc or loc.get("latitude") is None or loc.get("longitude") is None:
+        return None
+
+    confirmed = [p for p in participants if p["status"] == "confirmed"]
+    header_parts = [format_game_header(game, len(confirmed))]
+    title_str = escape(loc.get("title") or "Футбольное поле")
+    addr_str = escape(loc.get("address") or "")
+    lat = loc["latitude"]
+    lng = loc["longitude"]
+    map_url = f"https://maps.google.com/?q={lat},{lng}"
+    loc_desc = f"📍 <b>{title_str}</b>" + (f" ({addr_str})" if addr_str else "")
+    loc_desc += f"\n🚗 <a href=\"{map_url}\">Открыть на карте Google Maps</a>"
+    header_parts.append(f"🗺 <b>Локация:</b>\n<blockquote>{loc_desc}</blockquote>")
+
+    header_text = "\n\n".join(header_parts)
+    roster_text = format_game_roster(game, participants, payments)
+    return f"{header_text}\n\n{roster_text}"
 
 
 def format_game_payment_message(game: dict, participants: list[dict], payments: list[dict]) -> str:

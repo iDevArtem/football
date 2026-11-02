@@ -131,7 +131,6 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
         self.assertIn("📍 <b>Стадион Чемпион</b>", text)
         self.assertIn("📮 ул. Спортивная, 5", text)
         self.assertIn("<blockquote>", text)
-        self.assertIn("<blockquote expandable>", text)
 
     def test_render_game_message_without_location(self):
         game = {
@@ -145,7 +144,6 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
         }
         text = format_game_message(game, [])
         self.assertNotIn("🗺 <b>Локация и навигация:</b>", text)
-        self.assertIn("<blockquote expandable>", text)
 
     def test_admin_keyboard_has_location_button(self):
         kb = admin_game_keyboard("64a8b79f2e3d4c5b6a7b8c9d", friends_allowed=False, status="registration_open")
