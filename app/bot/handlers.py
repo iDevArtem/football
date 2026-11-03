@@ -805,9 +805,9 @@ async def execute_start_payments(
     if duration_hours.is_integer():
         duration_hours = int(duration_hours)
 
-    card_info = f"\nКарта: <code>{card_number.strip()}</code>"
+    card_info = f"\nКарта: <code>{html.escape(card_number.strip())}</code>"
     if recipient.strip():
-        card_info += f" ({recipient.strip()})"
+        card_info += f" ({html.escape(recipient.strip())})"
 
     excluded_str = f" (не играли: {len(excluded_set)})" if excluded_set else ""
     msg_text = (
@@ -1110,11 +1110,11 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         card_details = await settings_repo.get_default_payment_details()
         card_num = card_details.get("card_number") or "не указана"
         rec = card_details.get("recipient") or ""
-        rec_str = f" ({rec})" if rec else ""
+        rec_str = f" ({html.escape(rec)})" if rec else ""
         await edit_admin_message(
             f"⏱️ Длительность: <b>{minutes} мин</b>\n\n"
             f"💳 <b>Реквизиты для оплаты:</b>\n"
-            f"Номер: <code>{card_num}</code>{rec_str}\n\n"
+            f"Номер: <code>{html.escape(card_num)}</code>{rec_str}\n\n"
             f"Использовать эту карту или ввести другую?",
             card_confirmation_keyboard(game_id, minutes),
         )
@@ -1796,7 +1796,7 @@ async def admin_card_input(message: Message, state: FSMContext) -> None:
     PENDING_ROSTER_VERIFICATIONS.pop(message.from_user.id, None)
 
     async def _send_summary(msg_text, markup):
-        await message.answer(msg_text, reply_markup=markup)
+        await message.answer(msg_text, reply_markup=markup, parse_mode="HTML")
 
     await execute_start_payments(
         message.bot,

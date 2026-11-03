@@ -9,6 +9,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config.settings import get_settings
@@ -45,7 +47,10 @@ async def lifespan(app: FastAPI):
     dp = None
 
     if settings.bot_token and not settings.bot_token.startswith("test"):
-        bot = Bot(token=settings.bot_token)
+        bot = Bot(
+            token=settings.bot_token,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
         set_bot(bot)
         dp = Dispatcher(storage=MemoryStorage())
         dp.include_router(bot_router)

@@ -150,3 +150,82 @@ async def test_admin_callback_does_not_edit_game_card():
         # Must send private message instead
         mock_send_private.assert_called_once()
         callback.answer.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_admin_card_input_summary_parse_mode_html():
+    from app.bot.handlers import admin_card_input
+    message = MagicMock()
+    message.from_user.id = 12345
+    message.text = "4441 0000 1111 2222 Димон"
+    message.answer = AsyncMock()
+    message.bot = MagicMock()
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={"game_id": "6724123456789abcdef01234", "duration": 90})
+
+    with patch("app.bot.handlers.is_admin", return_value=True), \
+         patch("app.bot.handlers.execute_start_payments", new_callable=AsyncMock) as mock_exec:
+        await admin_card_input(message, state)
+        mock_exec.assert_awaited_once()
+        edit_fn = mock_exec.call_args.kwargs.get("edit_message_fn")
+        assert edit_fn is not None
+        await edit_fn("✅ Сбор оплат начат!\n\nДлительность: <b>1.5 ч</b>", None)
+        message.answer.assert_awaited_once_with(
+            "✅ Сбор оплат начат!\n\nДлительность: <b>1.5 ч</b>",
+            reply_markup=None,
+            parse_mode="HTML",
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_start_payments_html_escapes():
+    db = MagicMock()
+    game_id = "6724123456789abcdef01234"
+    mock_game = {
+        "_id": ObjectId(game_id),
+        "title": "Матч 5х5",
+        "hourly_rate": 600,
+        "friends_allowed": False,
+        "status": "game_started",
+    }
+    with patch("app.bot.handlers.get_db", return_value=db), \
+         patch("app.bot.handlers.GameRepository") as mock_game_repo_cls, \
+         patch("app.bot.handlers.ParticipantRepository") as mock_part_repo_cls, \
+         patch("app.bot.handlers.PaymentRepository") as mock_pay_repo_cls, \
+         patch("app.bot.handlers.SettingsRepository") as mock_settings_repo_cls, \
+         patch("app.bot.handlers.update_game_message", new_callable=AsyncMock):
+
+        game_repo = MagicMock()
+        game_repo.get = AsyncMock(return_value=mock_game)
+        mock_game_repo_cls.return_value = game_repo
+
+        part_repo = MagicMock()
+        part_repo.count_confirmed = AsyncMock(return_value=10)
+        mock_part_repo_cls.return_value = part_repo
+
+        pay_repo = MagicMock()
+        pay_repo.ensure_for_game = AsyncMock()
+        mock_pay_repo_cls.return_value = pay_repo
+
+        settings_repo = MagicMock()
+        settings_repo.set_default_payment_details = AsyncMock()
+        mock_settings_repo_cls.return_value = settings_repo
+
+        db.games.update_one = AsyncMock(return_value=MagicMock(matched_count=1))
+        bot = MagicMock()
+        mock_edit_fn = AsyncMock()
+
+        await execute_start_payments(
+            bot=bot,
+            game_id=game_id,
+            minutes=90,
+            card_number="4441 <2222> 3333",
+            recipient="Димон & Со",
+            edit_message_fn=mock_edit_fn,
+        )
+
+        mock_edit_fn.assert_awaited_once()
+        msg_text = mock_edit_fn.call_args[0][0]
+        assert "Карта: <code>4441 &lt;2222&gt; 3333</code> (Димон &amp; Со)" in msg_text
+
+
