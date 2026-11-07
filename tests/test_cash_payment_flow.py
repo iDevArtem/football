@@ -174,13 +174,17 @@ async def test_admin_callback_cash_payment_flow():
     participants = [{"_id": p1_id, "display_name": "Игрок", "status": "confirmed"}]
 
     db = MagicMock()
-    async def async_cursor(*args, **kwargs):
-        for p in participants:
-            yield p
+    def make_cursor():
+        async def async_cursor(*args, **kwargs):
+            for p in participants:
+                yield p
+        mock_cursor = MagicMock()
+        mock_cursor.sort = MagicMock(side_effect=lambda *a, **k: make_cursor())
+        mock_cursor.__aiter__ = lambda s: async_cursor()
+        return mock_cursor
 
-    mock_find = MagicMock()
-    mock_find.sort = MagicMock(return_value=async_cursor())
-    db.participants.find = MagicMock(return_value=mock_find)
+    mock_find = MagicMock(side_effect=lambda *a, **k: make_cursor())
+    db.participants.find = mock_find
     db.participants.count_documents = AsyncMock(return_value=1)
 
     game_doc = {

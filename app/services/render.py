@@ -161,6 +161,25 @@ def format_game_roster(game: dict, participants: list[dict], payments: list[dict
                 lines.append(f"{index}. {mark} {escape(participant['display_name'])} — <b>{pay_mark}</b>")
         else:
             lines.append("—")
+
+        if reserve:
+            lines.append("")
+            lines.append("<b>Резерв:</b>")
+            for index, participant in enumerate(reserve, 1):
+                mark = "👥" if participant.get("type") in ("friend", "guest") else "•"
+                payment = payment_by_participant_id.get(str(participant["_id"]))
+                payment_status = payment.get("status") if payment else "not_played"
+                if payment_status == "paid":
+                    pay_mark = "✅ оплатил"
+                    paid_count += 1
+                elif payment_status == "not_played":
+                    pay_mark = "🚫 не играл"
+                    not_played_count += 1
+                else:
+                    pay_mark = "❌ не оплатил"
+                    pending_count += 1
+                lines.append(f"{index}. {mark} {escape(participant['display_name'])} — <b>{pay_mark}</b>")
+
         lines += [
             "",
             f"💳 Оплатили: <b>{paid_count}</b>",
@@ -184,7 +203,7 @@ def format_game_roster(game: dict, participants: list[dict], payments: list[dict
             lines.append(f"{index}. {mark} {escape(p['display_name'])}")
         lines.append("")
 
-    if reserve:
+    if status not in ("payment_collection", "closed") and reserve:
         lines.append("<b>Резерв:</b>")
         for index, p in enumerate(reserve, 1):
             mark = "👥" if p.get("type") in ("friend", "guest") else "•"
@@ -205,7 +224,7 @@ def format_game_roster(game: dict, participants: list[dict], payments: list[dict
     elif status == "payment_collection":
         if game.get("finish_note"):
             lines.append(f"🏁 <b>Итоги матча:</b>\n{escape(str(game['finish_note']).strip())}\n")
-        lines.append("Сбор оплат начат. Нажмите кнопку ниже: оплатил или не играл.")
+        lines.append("Сбор оплат начат. Нажмите кнопку «💳 Оплатил» ниже после перевода.")
     elif status == "closed":
         if game.get("finish_note"):
             lines.append(f"🏁 <b>Итоги матча:</b>\n{escape(str(game['finish_note']).strip())}\n")

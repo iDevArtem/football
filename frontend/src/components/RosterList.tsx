@@ -141,15 +141,36 @@ export function RosterList({
                   </div>
                 </div>
 
-                {isAdmin && onParticipantAction && (
-                  <button
-                    onClick={() => onParticipantAction(p, "toggle_confirmed")}
-                    title="Переместить в основу"
-                    className="text-[10px] p-1 text-slate-400 hover:text-emerald-400"
-                  >
-                    ⬆
-                  </button>
-                )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {showPayments && (
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${
+                        p.payment_status === "paid"
+                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                          : p.payment_status === "not_played"
+                          ? "bg-slate-700 text-slate-400"
+                          : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                      }`}
+                    >
+                      {p.payment_status === "paid" && <CheckCircle2 className="w-2.5 h-2.5" />}
+                      {p.payment_status === "paid"
+                        ? "Оплачено"
+                        : p.payment_status === "not_played"
+                        ? "Не играл"
+                        : "Ожидает"}
+                    </span>
+                  )}
+
+                  {isAdmin && onParticipantAction && (
+                    <button
+                      onClick={() => onParticipantAction(p, "toggle_confirmed")}
+                      title="Переместить в основу"
+                      className="text-[10px] p-1 text-slate-400 hover:text-emerald-400"
+                    >
+                      ⬆
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

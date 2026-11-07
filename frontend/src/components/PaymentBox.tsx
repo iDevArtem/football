@@ -101,33 +101,27 @@ export function PaymentBox({
       )}
 
       {/* Action Buttons for User */}
-      <div className="grid grid-cols-2 gap-2.5">
-        <button
-          onClick={() => handleAction("paid")}
-          disabled={loading || myStatus === "paid"}
-          className={`py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-            myStatus === "paid"
-              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 cursor-default"
-              : "bg-emerald-500 hover:bg-emerald-400 text-white shadow-lg shadow-emerald-500/20 active:scale-95"
-          }`}
-        >
-          <CheckCircle2 className="w-4 h-4" />
-          {myStatus === "paid" ? "Вы оплатили ✅" : "Я оплатил"}
-        </button>
-
-        <button
-          onClick={() => handleAction("not_played")}
-          disabled={loading || myStatus === "not_played"}
-          className={`py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-            myStatus === "not_played"
-              ? "bg-slate-800 text-slate-400 border border-slate-700 cursor-default"
-              : "bg-slate-800 hover:bg-slate-700 text-slate-300 active:scale-95"
-          }`}
-        >
-          <XCircle className="w-4 h-4" />
-          {myStatus === "not_played" ? "Не играл" : "Не играл"}
-        </button>
-      </div>
+      {myStatus === "not_played" ? (
+        <div className="py-2.5 px-4 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 text-xs text-center flex items-center justify-center gap-1.5">
+          <XCircle className="w-4 h-4 text-slate-500" />
+          <span>Вы отмечены организатором как «Не играл» (оплата не требуется)</span>
+        </div>
+      ) : (
+        <div>
+          <button
+            onClick={() => handleAction("paid")}
+            disabled={loading || myStatus === "paid"}
+            className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              myStatus === "paid"
+                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 cursor-default"
+                : "bg-emerald-500 hover:bg-emerald-400 text-white shadow-lg shadow-emerald-500/20 active:scale-95"
+            }`}
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            {myStatus === "paid" ? "Вы оплатили ✅" : "Я оплатил"}
+          </button>
+        </div>
+      )}
 
       {/* Friend Payments Section */}
       {myFriends && myFriends.length > 0 && (
@@ -170,38 +164,26 @@ export function PaymentBox({
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
-                  <button
-                    onClick={async () => {
-                      if (onFriendStatusChange) {
-                        await onFriendStatusChange(friend.id, "paid");
-                      }
-                    }}
-                    disabled={friend.payment_status === "paid"}
-                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition flex items-center gap-1 ${
-                      friend.payment_status === "paid"
-                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-default"
-                        : "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 active:scale-95"
-                    }`}
-                  >
-                    <CheckCircle2 className="w-3 h-3" />
-                    Оплатил
-                  </button>
-                  <button
-                    onClick={async () => {
-                      if (onFriendStatusChange) {
-                        await onFriendStatusChange(friend.id, "not_played");
-                      }
-                    }}
-                    disabled={friend.payment_status === "not_played"}
-                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition flex items-center gap-1 ${
-                      friend.payment_status === "not_played"
-                        ? "bg-slate-800 text-slate-500 border border-slate-700 cursor-default"
-                        : "bg-slate-800 hover:bg-slate-700 text-slate-300 active:scale-95"
-                    }`}
-                  >
-                    <XCircle className="w-3 h-3" />
-                    Не играл
-                  </button>
+                  {friend.payment_status === "not_played" ? (
+                    <span className="text-[11px] text-slate-500 italic px-2">Не играл</span>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        if (onFriendStatusChange) {
+                          await onFriendStatusChange(friend.id, "paid");
+                        }
+                      }}
+                      disabled={friend.payment_status === "paid"}
+                      className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition flex items-center gap-1 ${
+                        friend.payment_status === "paid"
+                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-default"
+                          : "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 active:scale-95"
+                      }`}
+                    >
+                      <CheckCircle2 className="w-3 h-3" />
+                      {friend.payment_status === "paid" ? "Оплачено ✅" : "Оплатил"}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

@@ -338,6 +338,10 @@ async def update_payment_status(
     if req.status not in {"paid", "not_played"}:
         raise HTTPException(status_code=400, detail="Invalid status: must be 'paid' or 'not_played'")
 
+    is_admin_user = user.get("role") == "admin"
+    if req.status == "not_played" and not is_admin_user:
+        raise HTTPException(status_code=403, detail="Статус «Не играл» выставляет только организатор")
+
     # If participant_id specified (for friend or specific participant)
     if req.participant_id:
         success = await pay_repo.mark_by_participant_id(
@@ -345,16 +349,18 @@ async def update_payment_status(
             participant_id=req.participant_id,
             status=req.status,
             actor_telegram_id=user["telegram_id"],
-            is_admin=user.get("role") == "admin",
+            is_admin=is_admin_user,
         )
         if not success:
             raise HTTPException(status_code=403, detail="Not authorized or participant not found")
     else:
         # Mark for user himself
         if req.status == "paid":
-            await pay_repo.mark_paid_by_user(game_id, user["telegram_id"])
+            success = await pay_repo.mark_paid_by_user(game_id, user["telegram_id"])
+            if not success:
+                raise HTTPException(status_code=404, detail="Participant not found")
         else:
-            await pay_repo.mark_not_played_by_user(game_id, user["telegram_id"])
+            raise HTTPException(status_code=403, detail="Статус «Не играл» выставляет только организатор")
 
     trigger_sync(game_id)
     bot = get_bot()

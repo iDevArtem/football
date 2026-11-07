@@ -8,7 +8,10 @@ class PaymentRepository:
 
     async def ensure_for_game(self, game_id: str, amount: int, excluded_participant_ids: set[str] | list[str] | None = None) -> None:
         excluded = set(str(pid) for pid in (excluded_participant_ids or []))
-        cursor = self.db.participants.find({"game_id": ObjectId(game_id), "status": "confirmed"})
+        cursor = self.db.participants.find({
+            "game_id": ObjectId(game_id),
+            "status": {"$in": ["confirmed", "reserve"]},
+        })
         now = datetime.now(timezone.utc)
         async for participant in cursor:
             pid = participant["_id"]
@@ -59,7 +62,7 @@ class PaymentRepository:
         now = datetime.now(timezone.utc)
         participants = await self.db.participants.find({
             "game_id": ObjectId(game_id),
-            "status": "confirmed",
+            "status": {"$in": ["confirmed", "reserve"]},
         }).to_list(None)
         excluded = excluded_participant_ids or set()
         for participant in participants:
@@ -100,10 +103,18 @@ class PaymentRepository:
             "game_id": ObjectId(game_id),
             "telegram_id": telegram_id,
             "type": "player",
-            "status": "confirmed",
+            "status": {"$in": ["confirmed", "reserve"]},
         })
         if not participant:
             return False
+
+        existing = await self.db.payments.find_one({
+            "game_id": ObjectId(game_id),
+            "participant_id": participant["_id"],
+        })
+        if existing and existing.get("status") == "not_played":
+            return False
+
         result = await self.db.payments.update_one(
             {"game_id": ObjectId(game_id), "participant_id": participant["_id"]},
             {"$set": {
@@ -113,39 +124,22 @@ class PaymentRepository:
             }},
             upsert=False,
         )
-        # matched_count важнее modified_count: если игрок уже был paid, документ не изменится,
-        # но это все равно валидное нажатие кнопки.
         return result.matched_count > 0
-
 
     async def mark_not_played_by_user(self, game_id: str, telegram_id: int) -> bool:
-        participant = await self.db.participants.find_one({
-            "game_id": ObjectId(game_id),
-            "telegram_id": telegram_id,
-            "type": "player",
-            "status": "confirmed",
-        })
-        if not participant:
-            return False
-        result = await self.db.payments.update_one(
-            {"game_id": ObjectId(game_id), "participant_id": participant["_id"]},
-            {"$set": {
-                "status": "not_played",
-                "confirmed_by_user": True,
-                "updated_at": datetime.now(timezone.utc),
-            }},
-            upsert=False,
-        )
-        return result.matched_count > 0
-
+        # Игрокам больше недоступна смена статуса на "не играл"
+        return False
 
     async def mark_by_participant_id(self, game_id: str, participant_id: str, status: str, actor_telegram_id: int, is_admin: bool = False) -> bool:
         if status not in {"paid", "not_played", "pending"}:
             return False
+        if status == "not_played" and not is_admin:
+            return False
+
         participant = await self.db.participants.find_one({
             "_id": ObjectId(participant_id),
             "game_id": ObjectId(game_id),
-            "status": "confirmed",
+            "status": {"$in": ["confirmed", "reserve"]},
         })
         if not participant:
             return False
@@ -155,6 +149,14 @@ class PaymentRepository:
         elif participant.get("type") == "player" and not is_admin:
             if participant.get("telegram_id") != actor_telegram_id:
                 return False
+
+        existing = await self.db.payments.find_one({
+            "game_id": ObjectId(game_id),
+            "participant_id": participant["_id"],
+        })
+        if not is_admin and existing and existing.get("status") == "not_played":
+            return False
+
         result = await self.db.payments.update_one(
             {"game_id": ObjectId(game_id), "participant_id": participant["_id"]},
             {"$set": {

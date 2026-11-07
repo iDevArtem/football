@@ -12,7 +12,6 @@ def game_keyboard(
     if status == "payment_collection":
         rows.append([
             InlineKeyboardButton(text="💳 Оплатил", callback_data=f"pay:{game_id}:paid"),
-            InlineKeyboardButton(text="🚫 Не играл", callback_data=f"pay:{game_id}:not_played"),
         ])
         rows.append([
             InlineKeyboardButton(text="👥 Оплата друзей", callback_data=f"pay:{game_id}:friends"),
@@ -166,21 +165,29 @@ def payment_duration_keyboard(game_id: str, hourly_rate: int = 600, back_action:
     ])
 
 
-def verify_roster_keyboard(game_id: str, confirmed: list[dict], excluded_ids: set[str] | None = None) -> InlineKeyboardMarkup:
+def verify_roster_keyboard(game_id: str, participants: list[dict], excluded_ids: set[str] | None = None) -> InlineKeyboardMarkup:
     excluded = excluded_ids or set()
     rows = []
-    for participant in confirmed:
+    for participant in participants:
         p_id = str(participant["_id"])
         name = participant.get("display_name", "Игрок")
-        mark = "👥 " if participant.get("type") == "friend" else ""
+        is_reserve = participant.get("status") == "reserve"
+        is_friend = participant.get("type") in ("friend", "guest")
+        mark = "👥 " if is_friend else ""
+        reserve_suffix = ", не играл" if is_reserve else ""
+        reserve_mark = " (резерв)" if is_reserve else ""
+
         if p_id in excluded:
-            btn_text = f"🚫 {mark}{name} (не играл)"
+            if is_reserve:
+                btn_text = f"🚫 {mark}{name} (резерв, не играл)"
+            else:
+                btn_text = f"🚫 {mark}{name} (не играл)"
         else:
-            btn_text = f"✅ {mark}{name}"
+            btn_text = f"✅ {mark}{name}{reserve_mark}"
         rows.append([
             InlineKeyboardButton(text=btn_text, callback_data=f"vr:{game_id}:{p_id}")
         ])
-    playing_count = len(confirmed) - len(excluded)
+    playing_count = len(participants) - len(excluded)
     rows.append([
         InlineKeyboardButton(
             text=f"➡️ К расчету ({playing_count} чел)",
@@ -210,7 +217,6 @@ def payment_keyboard(game_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Оплатил", callback_data=f"pay:{game_id}:paid")],
-            [InlineKeyboardButton(text="🚫 Не играл", callback_data=f"pay:{game_id}:not_played")],
         ]
     )
 
@@ -229,14 +235,15 @@ def friends_payment_keyboard(game_id: str, friends: list[dict], payments_by_part
         status = payment.get("status") if payment else "pending"
         if status == "paid":
             status_text = "✅"
+            rows.append([InlineKeyboardButton(text=f"{status_text} {friend['display_name']} (оплачено)", callback_data="noop")])
         elif status == "not_played":
             status_text = "🚫"
+            rows.append([InlineKeyboardButton(text=f"{status_text} {friend['display_name']} (не играл)", callback_data="noop")])
         else:
             status_text = "❌"
-        rows.append([InlineKeyboardButton(text=f"{status_text} {friend['display_name']}", callback_data="noop")])
-        rows.append([
-            InlineKeyboardButton(text="✅ Оплатил", callback_data=f"pf:{participant_id}:p"),
-            InlineKeyboardButton(text="🚫 Не играл", callback_data=f"pf:{participant_id}:n"),
-        ])
+            rows.append([InlineKeyboardButton(text=f"{status_text} {friend['display_name']}", callback_data="noop")])
+            rows.append([
+                InlineKeyboardButton(text="✅ Оплатил", callback_data=f"pf:{participant_id}:p"),
+            ])
     rows.append([InlineKeyboardButton(text="Закрыть", callback_data=f"pfc:{game_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

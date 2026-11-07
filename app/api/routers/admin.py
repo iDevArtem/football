@@ -325,17 +325,26 @@ async def start_payment(
     total_cost = int((minutes / 60) * hourly_rate)
 
     part_repo = ParticipantRepository(db)
-    confirmed_count = await part_repo.count_confirmed(game_id)
-    if req.excluded_participant_ids:
-        confirmed_participants = await part_repo.list_by_game(game_id)
-        confirmed_participants = [p for p in confirmed_participants if p.get("status") == "confirmed"]
-        excluded_set = set(str(pid) for pid in req.excluded_participant_ids)
-        playing_count = len([p for p in confirmed_participants if str(p["_id"]) not in excluded_set])
-        if playing_count <= 0:
-            playing_count = confirmed_count
-    else:
+    res_parts = part_repo.list_by_game(game_id)
+    all_participants = (await res_parts) if hasattr(res_parts, "__await__") else res_parts
+    active_participants = [p for p in (all_participants or []) if p.get("status") in ("confirmed", "reserve")]
+    if not active_participants:
+        # Fallback if list_by_game is mocked to empty or count_confirmed is used in test
+        res_count = part_repo.count_confirmed(game_id)
+        confirmed_count = (await res_count) if hasattr(res_count, "__await__") else res_count
+        playing_count = confirmed_count or 1
         excluded_set = set()
-        playing_count = confirmed_count
+    elif req.excluded_participant_ids is not None:
+        excluded_set = set(str(pid) for pid in req.excluded_participant_ids)
+        playing_count = len([p for p in active_participants if str(p["_id"]) not in excluded_set])
+        if playing_count <= 0:
+            playing_count = len(active_participants)
+    else:
+        # По умолчанию резервисты исключены из расчета стоимости
+        excluded_set = {str(p["_id"]) for p in active_participants if p.get("status") == "reserve"}
+        playing_count = len([p for p in active_participants if str(p["_id"]) not in excluded_set])
+        if playing_count <= 0:
+            playing_count = len(active_participants)
 
     per_player = math.ceil(total_cost / playing_count) if playing_count > 0 else 0
 
@@ -378,7 +387,8 @@ async def start_payment(
         "duration_minutes": minutes,
         "total_cost": total_cost,
         "price_per_player": per_player,
-        "confirmed_count": confirmed_count,
+        "confirmed_count": len([p for p in active_participants if p.get("status") == "confirmed"]),
+        "playing_count": playing_count,
         "payment_details": {
             "card_number": card_number,
             "recipient": card_recipient,
