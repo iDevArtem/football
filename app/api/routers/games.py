@@ -67,6 +67,7 @@ def serialize_game(game: dict, confirmed_count: int, reserve_count: int = 0) -> 
         "hourly_rate": game.get("hourly_rate", 600),
         "price": game.get("price", 0),
         "total_cost": game.get("total_cost"),
+        "finish_note": game.get("finish_note"),
         "cancel_reason": game.get("cancel_reason"),
         "location": game.get("location"),
         "linked_chats": [
@@ -169,7 +170,7 @@ async def join_game(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "payment_collection"}:
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "finished", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
     first_name = user.get("first_name", "")
@@ -223,7 +224,7 @@ async def leave_game(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "payment_collection"}:
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "finished", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
     first_name = user.get("first_name", "")
@@ -265,7 +266,7 @@ async def add_friend(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "payment_collection"}:
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "finished", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
     if not game.get("friends_allowed"):
@@ -305,7 +306,7 @@ async def remove_friend(
     game = await game_repo.get_by_id(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
-    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "payment_collection"}:
+    if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "finished", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
     success = await part_repo.cancel_friend(game_id, participant_id, user["telegram_id"])
@@ -356,4 +357,12 @@ async def update_payment_status(
             await pay_repo.mark_not_played_by_user(game_id, user["telegram_id"])
 
     trigger_sync(game_id)
+    bot = get_bot()
+    if bot:
+        try:
+            from app.bot.handlers import check_and_notify_all_paid
+            import asyncio
+            asyncio.create_task(check_and_notify_all_paid(bot, game_id))
+        except Exception:
+            pass
     return {"status": req.status}

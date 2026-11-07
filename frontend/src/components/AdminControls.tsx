@@ -1,6 +1,6 @@
 // frontend/src/components/AdminControls.tsx
 import React, { useState, useEffect } from "react";
-import { Play, UserPlus, Ban, Users, DollarSign, Send, Settings, Check } from "lucide-react";
+import { Play, UserPlus, Ban, Users, DollarSign, Send, Settings, Check, Flag, CheckCircle2 } from "lucide-react";
 import { apiRequest } from "../api/client";
 
 interface AdminControlsProps {
@@ -24,6 +24,8 @@ export function AdminControls({
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showFinishModal, setShowFinishModal] = useState(false);
+  const [finishNote, setFinishNote] = useState("");
   const [showGuestModal, setShowGuestModal] = useState(false);
   const [guestName, setGuestName] = useState("");
   const [friendError, setFriendError] = useState<string | null>(null);
@@ -56,6 +58,33 @@ export function AdminControls({
     setLoading(true);
     try {
       await apiRequest(`/api/admin/games/${gameId}/start`, {
+        method: "POST",
+      });
+      onRefresh();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFinishGame = async () => {
+    setLoading(true);
+    try {
+      await apiRequest(`/api/admin/games/${gameId}/finish`, {
+        method: "POST",
+        body: JSON.stringify({ finish_note: finishNote.trim() || undefined }),
+      });
+      setShowFinishModal(false);
+      onRefresh();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClosePayment = async () => {
+    if (!window.confirm("Завершить сбор оплат и перенести игру в архив?")) return;
+    setLoading(true);
+    try {
+      await apiRequest(`/api/admin/games/${gameId}/close`, {
         method: "POST",
       });
       onRefresh();
@@ -145,6 +174,7 @@ export function AdminControls({
 
   const canStartGame =
     gameStatus !== "game_started" &&
+    gameStatus !== "finished" &&
     gameStatus !== "payment_collection" &&
     gameStatus !== "closed" &&
     gameStatus !== "cancelled";
@@ -174,6 +204,18 @@ export function AdminControls({
           </button>
         )}
 
+        {/* Finish Game Button (when started or registration open) */}
+        {gameStatus !== "finished" && gameStatus !== "payment_collection" && gameStatus !== "closed" && gameStatus !== "cancelled" && (
+          <button
+            onClick={() => setShowFinishModal(true)}
+            disabled={loading}
+            className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+          >
+            <Flag className="w-3.5 h-3.5" />
+            Завершить
+          </button>
+        )}
+
         {/* Add Friend Button */}
         <button
           onClick={() => {
@@ -193,7 +235,7 @@ export function AdminControls({
         </button>
 
         {/* Toggle Friends */}
-        {gameStatus !== "game_started" && gameStatus !== "payment_collection" && (
+        {gameStatus !== "game_started" && gameStatus !== "finished" && gameStatus !== "payment_collection" && gameStatus !== "closed" && (
           <button
             onClick={handleToggleFriends}
             disabled={loading || gameStatus === "cancelled"}
@@ -208,15 +250,34 @@ export function AdminControls({
           </button>
         )}
 
-        {/* Start Payment */}
-        <button
-          onClick={() => setShowPaymentModal(true)}
-          disabled={loading || gameStatus === "cancelled" || gameStatus === "closed"}
-          className="p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
-        >
-          <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-          Сбор оплат
-        </button>
+        {/* Start Payment (only available when game is finished) */}
+        {gameStatus !== "payment_collection" && gameStatus !== "closed" && (
+          <button
+            onClick={() => setShowPaymentModal(true)}
+            disabled={loading || gameStatus !== "finished"}
+            className={`p-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition ${
+              gameStatus === "finished"
+                ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 font-bold"
+                : "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+            }`}
+            title={gameStatus !== "finished" ? "Сначала завершите игру" : undefined}
+          >
+            <DollarSign className={`w-3.5 h-3.5 ${gameStatus === "finished" ? "text-emerald-400" : "text-slate-600"}`} />
+            Сбор оплат
+          </button>
+        )}
+
+        {/* Close Payment */}
+        {gameStatus === "payment_collection" && (
+          <button
+            onClick={handleClosePayment}
+            disabled={loading}
+            className="p-2.5 rounded-xl bg-teal-500/20 border border-teal-500/40 text-teal-300 hover:bg-teal-500/30 text-xs font-bold flex items-center justify-center gap-1.5 transition"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Закрыть сбор
+          </button>
+        )}
 
         {/* Publish */}
         <button
@@ -231,7 +292,7 @@ export function AdminControls({
         {/* Cancel */}
         <button
           onClick={() => setShowCancelModal(true)}
-          disabled={loading || gameStatus === "cancelled"}
+          disabled={loading || gameStatus === "cancelled" || gameStatus === "closed"}
           className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
         >
           <Ban className="w-3.5 h-3.5" />
@@ -278,6 +339,39 @@ export function AdminControls({
                 className="py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white text-xs font-bold transition"
               >
                 {loading ? "Добавляем..." : "Добавить"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Finish Game Modal */}
+      {showFinishModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl">
+            <h4 className="text-base font-bold text-white mb-2">Завершение игры</h4>
+            <p className="text-xs text-slate-400 mb-4">
+              Укажите итоги матча (счёт, яркие моменты). Фотоотчёт можно отправить боту в Telegram.
+            </p>
+            <textarea
+              placeholder="Счёт матча, победители или комментарий..."
+              value={finishNote}
+              onChange={(e) => setFinishNote(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-amber-500 mb-4 h-24 resize-none"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setShowFinishModal(false)}
+                className="py-2.5 rounded-xl bg-slate-800 text-slate-400 text-xs font-semibold hover:text-white"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleFinishGame}
+                disabled={loading}
+                className="py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition"
+              >
+                {loading ? "Завершаем..." : "Завершить игру"}
               </button>
             </div>
           </div>

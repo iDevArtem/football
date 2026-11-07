@@ -90,6 +90,15 @@ class TestE2EMultiGroupSimulation(unittest.IsolatedAsyncioTestCase):
                             ]
                 if "$set" in update:
                     db_games[gid].update(update["$set"])
+        async def mock_game_find_one_and_update(flt, update, **kwargs):
+            gid = flt["_id"]
+            if gid in db_games:
+                if "$inc" in update:
+                    for k, v in update["$inc"].items():
+                        db_games[gid][k] = db_games[gid].get(k, 0) + v
+                return db_games[gid]
+            return None
+        db.games.find_one_and_update = AsyncMock(side_effect=mock_game_find_one_and_update)
         db.games.update_one = AsyncMock(side_effect=mock_game_update_one)
 
         # Mock db.participants

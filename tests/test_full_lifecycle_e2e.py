@@ -117,6 +117,21 @@ async def test_full_lifecycle_e2e(app, admin_token, player_a_token, player_b_tok
         game_repo.get = AsyncMock(side_effect=mock_game_get)
         game_repo.get_by_id = AsyncMock(side_effect=mock_game_get)
         game_repo.set_status = AsyncMock(side_effect=mock_game_set_status)
+
+        async def mock_finish_game(gid, finish_note=None, media_items=None):
+            game_state["status"] = "finished"
+            if finish_note:
+                game_state["finish_note"] = finish_note
+            if media_items:
+                game_state["media_items"] = media_items
+            return True
+
+        async def mock_close_game(gid):
+            game_state["status"] = "closed"
+            return True
+
+        game_repo.finish_game = AsyncMock(side_effect=mock_finish_game)
+        game_repo.close_game = AsyncMock(side_effect=mock_close_game)
         mock_admin_game_repo.return_value = game_repo
         mock_games_game_repo.return_value = game_repo
 
@@ -218,6 +233,16 @@ async def test_full_lifecycle_e2e(app, admin_token, player_a_token, player_b_tok
             assert res_guest.json()["type"] == "guest"
             assert len([p for p in participants_state if p["status"] == "confirmed"]) == 4
 
+            # 4b. Admin finishes game -> status becomes finished
+            res_finish = await client.post(
+                f"/api/admin/games/{game_id}/finish",
+                json={"finish_note": "Отличная игра 7:5!"},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert res_finish.status_code == 200
+            assert game_state["status"] == "finished"
+            assert game_state["finish_note"] == "Отличная игра 7:5!"
+
             # 5. Admin starts payment collection for 90 minutes with custom card
             res_pay = await client.post(
                 f"/api/admin/games/{game_id}/payment/start",
@@ -260,8 +285,23 @@ async def test_full_lifecycle_e2e(app, admin_token, player_a_token, player_b_tok
             )
             assert res_guest_pay.status_code == 200
 
-            # 9. Telegram render check: contains monospaced card number and card recipient
+            # 9. Telegram render check: contains monospaced card number, card recipient, and finish note
             render_text = format_game_message(game_state, participants_state, list(payments_state.values()))
             assert "<code>4441 0000 1111 2222</code>" in render_text
             assert "Олег О." in render_text
             assert "225 грн" in render_text
+            assert "Отличная игра 7:5!" in render_text
+
+            # 10. Admin closes game after payment collection
+            res_close = await client.post(
+                f"/api/admin/games/{game_id}/close",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert res_close.status_code == 200
+            assert game_state["status"] == "closed"
+
+            # In closed status, payment details and card are hidden, but finish note remains
+            render_closed = format_game_message(game_state, participants_state, list(payments_state.values()))
+            assert "Реквизиты для оплаты:" not in render_closed
+            assert "4441 0000 1111 2222" not in render_closed
+            assert "Отличная игра 7:5!" in render_closed

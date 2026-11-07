@@ -34,8 +34,22 @@ def game_keyboard(
 
 
 def admin_game_keyboard(game_id: str, *, friends_allowed: bool, status: str) -> InlineKeyboardMarkup | None:
-    if status in {"cancelled", "finished"}:
+    if status in {"cancelled", "closed"}:
         return None
+
+    if status == "finished":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Начать сбор оплат", callback_data=f"admin:{game_id}:confirm_payments")],
+            [InlineKeyboardButton(text="💵 Оплата наличными", callback_data=f"admin:{game_id}:confirm_cash_payments")],
+            [InlineKeyboardButton(text="📢 Публикация в группах", callback_data=f"admin:{game_id}:broadcast_menu")],
+            [InlineKeyboardButton(text="❌ Отменить игру", callback_data=f"admin:{game_id}:confirm_cancel")],
+        ])
+
+    if status == "payment_collection":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Завершить сбор оплат", callback_data=f"admin:{game_id}:confirm_close_payments")],
+            [InlineKeyboardButton(text="📢 Публикация в группах", callback_data=f"admin:{game_id}:broadcast_menu")],
+        ])
 
     close_text = "🔓 Открыть запись" if status == "registration_closed" else "🔒 Закрыть запись"
     close_action = "confirm_open_registration" if status == "registration_closed" else "confirm_close_registration"
@@ -61,18 +75,23 @@ def admin_game_keyboard(game_id: str, *, friends_allowed: bool, status: str) -> 
         ],
     ]
 
-    if status not in {"game_started", "payment_collection"}:
+    if status != "game_started":
         rows.append([InlineKeyboardButton(text=friends_text, callback_data=f"admin:{game_id}:{friends_action}")])
         rows.append([InlineKeyboardButton(text=close_text, callback_data=f"admin:{game_id}:{close_action}")])
         rows.append([InlineKeyboardButton(text="▶️ Начать игру", callback_data=f"admin:{game_id}:start_game")])
-
-    if status != "payment_collection":
-        rows.append([InlineKeyboardButton(text="💳 Начать сбор оплат", callback_data=f"admin:{game_id}:confirm_payments")])
 
     rows.append([InlineKeyboardButton(text="🏁 Завершить игру", callback_data=f"admin:{game_id}:finish_game")])
     rows.append([InlineKeyboardButton(text="❌ Отменить игру", callback_data=f"admin:{game_id}:confirm_cancel")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_post_finish_keyboard(game_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Начать сбор оплат", callback_data=f"admin:{game_id}:confirm_payments")],
+        [InlineKeyboardButton(text="💵 Оплата наличными", callback_data=f"admin:{game_id}:confirm_cash_payments")],
+        [InlineKeyboardButton(text="⚙️ Меню игры", callback_data=f"admin:{game_id}:settings")],
+    ])
 
 
 def admin_cancel_edit_keyboard(game_id: str) -> InlineKeyboardMarkup:
@@ -97,19 +116,26 @@ def card_confirmation_keyboard(game_id: str, duration_minutes: int) -> InlineKey
 
 
 def broadcast_groups_keyboard(game_id: str, chats: list[dict], linked_chat_ids: set[int]) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="📢 Опубликовать во всех", callback_data=f"admin:{game_id}:pub_all")]
+    has_linked = any(c["chat_id"] in linked_chat_ids for c in chats)
+    top_row = [
+        InlineKeyboardButton(text="📢 Опубликовать во всех", callback_data=f"admin:{game_id}:pub_all")
     ]
+    if has_linked:
+        top_row.append(
+            InlineKeyboardButton(text="🔄 Переотправить во всех", callback_data=f"admin:{game_id}:repub_all")
+        )
+    rows = [top_row]
+
     for chat in chats:
         cid = chat["chat_id"]
         title = chat.get("title", str(cid))
         if cid in linked_chat_ids:
-            btn_text = f"✅ {title}"
-            callback = f"admin:{game_id}:unpub:{cid}"
+            rows.append([
+                InlineKeyboardButton(text=f"✅ {title}", callback_data=f"admin:{game_id}:unpub:{cid}"),
+                InlineKeyboardButton(text="🔄 Вниз", callback_data=f"admin:{game_id}:repub:{cid}"),
+            ])
         else:
-            btn_text = f"➕ {title}"
-            callback = f"admin:{game_id}:pub:{cid}"
-        rows.append([InlineKeyboardButton(text=btn_text, callback_data=callback)])
+            rows.append([InlineKeyboardButton(text=f"➕ {title}", callback_data=f"admin:{game_id}:pub:{cid}")])
     rows.append([InlineKeyboardButton(text="⚙️ Меню игры", callback_data=f"admin:{game_id}:settings")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -120,6 +146,7 @@ def admin_confirm_keyboard(game_id: str, action: str) -> InlineKeyboardMarkup:
         "open_registration": "🔓 Да, открыть запись",
         "cancel": "❌ Да, отменить игру",
         "payments": "💳 Да, начать сбор оплат",
+        "close_payments": "✅ Да, завершить сбор оплат",
     }
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=labels.get(action, "✅ Подтвердить"), callback_data=f"admin:{game_id}:do_{action}")],
@@ -127,7 +154,7 @@ def admin_confirm_keyboard(game_id: str, action: str) -> InlineKeyboardMarkup:
     ])
 
 
-def payment_duration_keyboard(game_id: str, hourly_rate: int = 600) -> InlineKeyboardMarkup:
+def payment_duration_keyboard(game_id: str, hourly_rate: int = 600, back_action: str = "confirm_payments") -> InlineKeyboardMarkup:
     cost_90 = int(1.5 * hourly_rate)
     cost_120 = int(2.0 * hourly_rate)
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -135,7 +162,7 @@ def payment_duration_keyboard(game_id: str, hourly_rate: int = 600) -> InlineKey
             InlineKeyboardButton(text=f"⏱ 1.5 часа ({cost_90} грн)", callback_data=f"admin:{game_id}:paydur:90"),
             InlineKeyboardButton(text=f"⏱ 2.0 часа ({cost_120} грн)", callback_data=f"admin:{game_id}:paydur:120"),
         ],
-        [InlineKeyboardButton(text="Назад", callback_data=f"admin:{game_id}:confirm_payments")],
+        [InlineKeyboardButton(text="Назад", callback_data=f"admin:{game_id}:{back_action}")],
     ])
 
 

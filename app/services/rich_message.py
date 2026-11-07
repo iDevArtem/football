@@ -82,12 +82,13 @@ async def send_game_message(
     chat_id: int | str,
     game: dict,
     participants: list[dict],
+    payments: list[dict] | None = None,
     reply_markup: InlineKeyboardMarkup | None = None,
     link_preview_options: LinkPreviewOptions | None = None,
     message: Message | None = None,
 ) -> Message:
     """Отправляет карточку игры с форматированным HTML-описанием и кнопками."""
-    text = format_game_message(game, participants)
+    text = format_game_message(game, participants, payments)
     if message and hasattr(message, "answer"):
         res = message.answer(
             text=text,

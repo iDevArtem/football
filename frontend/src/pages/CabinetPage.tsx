@@ -349,6 +349,28 @@ export function CabinetPage({ initialGameId }: CabinetPageProps) {
                   <span>⚽</span> Матч начался! Запись и отмены заблокированы.
                 </p>
               </div>
+            ) : game.status === "finished" ? (
+              <div className="pt-4 border-t border-slate-800 text-center py-2.5 bg-amber-500/10 rounded-2xl border border-amber-500/20">
+                <p className="text-xs font-bold text-amber-300 flex items-center justify-center gap-2">
+                  <span>🏁</span> Матч завершён. Ожидайте запуск сбора оплат.
+                </p>
+                {game.finish_note && (
+                  <p className="text-xs text-slate-300 mt-1 italic">
+                    "{game.finish_note}"
+                  </p>
+                )}
+              </div>
+            ) : game.status === "closed" ? (
+              <div className="pt-4 border-t border-slate-800 text-center py-2.5 bg-slate-800/40 rounded-2xl border border-slate-700/40">
+                <p className="text-xs font-bold text-slate-300 flex items-center justify-center gap-2">
+                  <span>✅</span> Сбор оплат завершён. Игра в архиве.
+                </p>
+                {game.finish_note && (
+                  <p className="text-xs text-slate-400 mt-1 italic">
+                    "{game.finish_note}"
+                  </p>
+                )}
+              </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4 border-t border-slate-800">
                 {myParticipant?.status === "confirmed" || myParticipant?.status === "reserve" ? (

@@ -7,26 +7,29 @@ from app.bot.keyboards import admin_game_keyboard, admin_cancel_edit_keyboard, a
 from app.services.render import format_game_message, status_text
 
 
-def test_admin_keyboard_payment_collection_hides_pay_and_shows_finish():
+def test_admin_keyboard_payment_collection_shows_close_payments():
     game_id = "6724123456789abcdef01234"
     kb = admin_game_keyboard(game_id, friends_allowed=False, status="payment_collection")
     buttons = [btn.text for row in kb.inline_keyboard for btn in row]
     assert "💳 Начать сбор оплат" not in buttons
-    assert "🏁 Завершить игру" in buttons
+    assert "🏁 Завершить игру" not in buttons
+    assert "✅ Завершить сбор оплат" in buttons
 
 
-def test_admin_keyboard_finish_game_available_in_active_statuses():
+def test_admin_keyboard_finish_game_available_before_and_during_game():
     game_id = "6724123456789abcdef01234"
-    for st in ["registration_open", "game_started", "payment_collection"]:
+    for st in ["registration_open", "registration_closed", "game_started"]:
         kb = admin_game_keyboard(game_id, friends_allowed=False, status=st)
         buttons = [btn.text for row in kb.inline_keyboard for btn in row]
         assert "🏁 Завершить игру" in buttons, f"Missing in status {st}"
 
 
-def test_admin_keyboard_cancelled_and_finished_returns_none():
+def test_admin_keyboard_cancelled_and_closed_returns_none():
     game_id = "6724123456789abcdef01234"
     assert admin_game_keyboard(game_id, friends_allowed=False, status="cancelled") is None
-    assert admin_game_keyboard(game_id, friends_allowed=False, status="finished") is None
+    assert admin_game_keyboard(game_id, friends_allowed=False, status="closed") is None
+    # finished status has post-game actions (e.g. start payments), so keyboard is NOT None
+    assert admin_game_keyboard(game_id, friends_allowed=False, status="finished") is not None
 
 
 def test_admin_cancel_edit_keyboard():
@@ -203,7 +206,8 @@ async def test_admin_finish_game_with_photo():
             [-100111],
             [{"type": "photo", "file_id": "tg_photo_file_id"}],
         )
-        message.bot.delete_message.assert_called_once_with(chat_id=111, message_id=5555)
+        message.bot.edit_message_text.assert_called_once()
+        assert "Игра завершена!" in message.bot.edit_message_text.call_args.kwargs["text"]
 
 
 @pytest.mark.asyncio
@@ -268,7 +272,8 @@ async def test_admin_finish_game_with_album_deduplication():
         # All messages deleted
         for m in messages:
             m.delete.assert_called_once()
-        messages[0].bot.delete_message.assert_called_once_with(chat_id=111, message_id=5555)
+        messages[0].bot.edit_message_text.assert_called_once()
+        assert "Игра завершена!" in messages[0].bot.edit_message_text.call_args.kwargs["text"]
 
 
 @pytest.mark.asyncio
@@ -358,14 +363,14 @@ async def test_admin_do_cancel_deletes_management_menu():
 
 
 @pytest.mark.asyncio
-async def test_admin_do_finish_nocomment_deletes_management_menu():
+async def test_admin_do_finish_nocomment_shows_post_finish_menu():
     from app.bot.handlers import admin_callback
 
     callback = MagicMock()
     callback.data = "admin:6724123456789abcdef01234:do_finish_nocomment"
     callback.from_user.id = 111
     callback.message = MagicMock()
-    callback.message.delete = AsyncMock()
+    callback.message.edit_text = AsyncMock()
     callback.answer = AsyncMock()
     state = AsyncMock()
 
@@ -386,7 +391,8 @@ async def test_admin_do_finish_nocomment_deletes_management_menu():
             await admin_callback(callback, state)
 
         game_repo.finish_game.assert_called_once_with("6724123456789abcdef01234")
-        callback.message.delete.assert_called_once()
+        callback.message.edit_text.assert_called_once()
+        assert "Игра завершена!" in callback.message.edit_text.call_args[0][0]
         callback.answer.assert_called_once_with("Игра завершена 🏁")
 
 

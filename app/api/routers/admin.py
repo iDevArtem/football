@@ -66,6 +66,10 @@ class CancelGameRequest(BaseModel):
     reason: Optional[str] = "Игра отменена организатором"
 
 
+class FinishGameRequest(BaseModel):
+    finish_note: Optional[str] = None
+
+
 class ToggleFriendsRequest(BaseModel):
     allowed: bool
 
@@ -234,6 +238,64 @@ async def start_game(
     return {"status": "game_started"}
 
 
+@router.post("/games/{game_id}/finish")
+async def finish_game_endpoint(
+    game_id: str,
+    req: FinishGameRequest,
+    admin_user: dict = Depends(require_admin),
+):
+    try:
+        ObjectId(game_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid game_id")
+
+    db = get_db()
+    game_repo = GameRepository(db)
+    game = await game_repo.get(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    if game.get("status") in {"cancelled", "closed"}:
+        raise HTTPException(status_code=400, detail=f"Cannot finish game in status {game.get('status')}")
+
+    await game_repo.finish_game(game_id, finish_note=req.finish_note)
+    updated = await game_repo.get(game_id)
+
+    bot = get_bot()
+    if bot:
+        await update_game_message(bot, updated)
+    trigger_sync(game_id)
+
+    return {"status": "finished", "finish_note": req.finish_note}
+
+
+@router.post("/games/{game_id}/close")
+async def close_game_endpoint(
+    game_id: str,
+    admin_user: dict = Depends(require_admin),
+):
+    try:
+        ObjectId(game_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid game_id")
+
+    db = get_db()
+    game_repo = GameRepository(db)
+    game = await game_repo.get(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    await game_repo.close_game(game_id)
+    updated = await game_repo.get(game_id)
+
+    bot = get_bot()
+    if bot:
+        await update_game_message(bot, updated)
+    trigger_sync(game_id)
+
+    return {"status": "closed"}
+
+
 @router.post("/games/{game_id}/payment/start")
 async def start_payment(
     game_id: str,
@@ -254,6 +316,9 @@ async def start_payment(
     game = await game_repo.get(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
+
+    if game.get("status") != "finished":
+        raise HTTPException(status_code=400, detail="Сбор оплат доступен только после завершения игры")
 
     minutes = req.duration_minutes
     hourly_rate = game.get("hourly_rate", 600)
@@ -442,7 +507,8 @@ async def publish_game(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    from app.services.render import format_game_message
+    from app.services.rich_message import send_game_message
+    from app.bot.handlers import get_game_link_preview_options
     from app.bot.keyboards import game_keyboard
     from app.repositories.participants import ParticipantRepository
     from app.repositories.payments import PaymentRepository
@@ -450,14 +516,28 @@ async def publish_game(
     participants = await ParticipantRepository(db).list_by_game(game_id)
     payments = await PaymentRepository(db).list_by_game(game_id) if game.get("status") == "payment_collection" else []
 
-    text = format_game_message(game, participants, payments)
-    keyboard = game_keyboard(game_id, game.get("friends_allowed", False), game.get("status"))
+    keyboard = game_keyboard(
+        game_id,
+        game.get("friends_allowed", False),
+        game.get("status"),
+        location=game.get("location"),
+    )
+    link_preview = get_game_link_preview_options(game)
 
     for chat_id in req.chat_ids:
         try:
-            sent = await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", reply_markup=keyboard)
+            sent = await send_game_message(
+                bot,
+                chat_id,
+                game,
+                participants,
+                payments=payments,
+                reply_markup=keyboard,
+                link_preview_options=link_preview,
+            )
             chat_doc = await db.chats.find_one({"chat_id": chat_id})
             chat_title = chat_doc.get("title", f"Чат {chat_id}") if chat_doc else f"Чат {chat_id}"
+            await game_repo.remove_linked_message(game_id, chat_id)
             await game_repo.add_linked_message(game_id, chat_id, sent.message_id, chat_title)
         except Exception:
             pass

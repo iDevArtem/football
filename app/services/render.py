@@ -68,7 +68,7 @@ def format_game_header(game: dict, confirmed_count: int) -> str:
     date_text = start_at.strftime("%d.%m.%Y")
     time_text = start_at.strftime("%H:%M")
 
-    prefix = "❌ " if status == "cancelled" else ("🏁 " if status == "finished" else "⚽ ")
+    prefix = "❌ " if status == "cancelled" else ("🏁 " if status in ("finished", "closed") else "⚽ ")
     lines = [
         f"{prefix}<b>{escape(game['title'])}</b>",
         "",
@@ -90,10 +90,13 @@ def format_game_header(game: dict, confirmed_count: int) -> str:
         f"🎮 Формат: <b>{clean_format}</b>",
     ]
 
-    if status == "payment_collection":
+    if status in ("payment_collection", "closed") and (game.get("price") or game.get("total_cost")):
         total_cost = game.get("total_cost") or int((duration_min / 60) * hourly_rate)
         price_per_player = game.get("price", 0)
-        lines.append(f"💳 Аренда поля: <b>{total_cost} грн</b> — по <b>{price_per_player} грн</b> с игрока")
+        if game.get("payment_method") == "cash":
+            lines.append(f"💵 Аренда поля: <b>{total_cost} грн</b> — по <b>{price_per_player} грн</b> с игрока (наличные)")
+        else:
+            lines.append(f"💳 Аренда поля: <b>{total_cost} грн</b> — по <b>{price_per_player} грн</b> с игрока")
     else:
         lines.append(f"💰 Аренда поля: <b>{hourly_rate} грн/час</b>")
 
@@ -135,7 +138,7 @@ def format_game_roster(game: dict, participants: list[dict], payments: list[dict
         "",
     ]
 
-    if status == "payment_collection":
+    if status in ("payment_collection", "closed"):
         paid_count = 0
         not_played_count = 0
         pending_count = 0
@@ -166,13 +169,14 @@ def format_game_roster(game: dict, participants: list[dict], payments: list[dict
             "",
         ]
 
-        pay_details = game.get("payment_details") or {}
-        card_number = pay_details.get("card_number")
-        recipient = pay_details.get("recipient")
-        if card_number:
-            recipient_str = f" ({escape(recipient)})" if recipient else ""
-            lines.append(f"💳 Оплата на карту:\n<code>{escape(card_number)}</code>{recipient_str}\n(нажмите на номер, чтобы скопировать)")
-            lines.append("")
+        if status == "payment_collection":
+            pay_details = game.get("payment_details") or {}
+            card_number = pay_details.get("card_number")
+            recipient = pay_details.get("recipient")
+            if card_number:
+                recipient_str = f" ({escape(recipient)})" if recipient else ""
+                lines.append(f"💳 Оплата на карту:\n<code>{escape(card_number)}</code>{recipient_str}\n(нажмите на номер, чтобы скопировать)")
+                lines.append("")
     elif confirmed:
         lines.append("<b>Основной состав:</b>")
         for index, p in enumerate(confirmed, 1):
@@ -193,17 +197,26 @@ def format_game_roster(game: dict, participants: list[dict], payments: list[dict
 
     if status == "game_started":
         lines.append("⚽ Матч начался! Запись и отмены заблокированы.")
-    elif status == "payment_collection":
-        lines.append("Сбор оплат начат. Нажмите кнопку ниже: оплатил или не играл.")
-    elif status == "cancelled":
-        lines.append("Игра отменена. Кнопки записи отключены.")
-    elif status == "registration_closed":
-        lines.append("Запись закрыта админом.")
     elif status == "finished":
         if game.get("finish_note"):
             lines.append(f"🏁 <b>Итоги матча:</b>\n{escape(str(game['finish_note']).strip())}")
         else:
             lines.append("🏁 Игра завершена.")
+    elif status == "payment_collection":
+        if game.get("finish_note"):
+            lines.append(f"🏁 <b>Итоги матча:</b>\n{escape(str(game['finish_note']).strip())}\n")
+        lines.append("Сбор оплат начат. Нажмите кнопку ниже: оплатил или не играл.")
+    elif status == "closed":
+        if game.get("finish_note"):
+            lines.append(f"🏁 <b>Итоги матча:</b>\n{escape(str(game['finish_note']).strip())}\n")
+        if game.get("payment_method") == "cash":
+            lines.append("✅ Оплата наличными зафиксирована. Всем спасибо за игру!")
+        else:
+            lines.append("✅ Сбор оплат завершён. Всем спасибо за игру!")
+    elif status == "cancelled":
+        lines.append("Игра отменена. Кнопки записи отключены.")
+    elif status == "registration_closed":
+        lines.append("Запись закрыта админом.")
 
     return "\n".join(lines).strip()
 

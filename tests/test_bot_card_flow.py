@@ -27,11 +27,17 @@ def test_admin_keyboard_start_game_and_payments():
     buttons_open = [btn.text for row in kb_open.inline_keyboard for btn in row]
     assert "▶️ Начать игру" in buttons_open
 
-    # During game_started: should have "💳 Начать сбор оплат"
+    # During game_started: should have "🏁 Завершить игру", but NOT "💳 Начать сбор оплат"
     kb_live = admin_game_keyboard("6724123456789abcdef01234", friends_allowed=False, status="game_started")
     buttons_live = [btn.text for row in kb_live.inline_keyboard for btn in row]
-    assert "💳 Начать сбор оплат" in buttons_live
-    assert "▶️ Начать игру" not in buttons_live
+    assert "🏁 Завершить игру" in buttons_live
+    assert "💳 Начать сбор оплат" not in buttons_live
+
+    # When game is finished: should have "💳 Начать сбор оплат"
+    kb_fin = admin_game_keyboard("6724123456789abcdef01234", friends_allowed=False, status="finished")
+    buttons_fin = [btn.text for row in kb_fin.inline_keyboard for btn in row]
+    assert "💳 Начать сбор оплат" in buttons_fin
+    assert "🏁 Завершить игру" not in buttons_fin
 
 
 def test_card_confirmation_keyboard():
@@ -55,7 +61,7 @@ async def test_execute_start_payments():
         "title": "Матч 5х5",
         "hourly_rate": 600,
         "friends_allowed": False,
-        "status": "game_started",
+        "status": "finished",
     }
     with patch("app.bot.handlers.get_db", return_value=db), \
          patch("app.bot.handlers.GameRepository") as mock_game_repo_cls, \
@@ -186,7 +192,7 @@ async def test_execute_start_payments_html_escapes():
         "title": "Матч 5х5",
         "hourly_rate": 600,
         "friends_allowed": False,
-        "status": "game_started",
+        "status": "finished",
     }
     with patch("app.bot.handlers.get_db", return_value=db), \
          patch("app.bot.handlers.GameRepository") as mock_game_repo_cls, \

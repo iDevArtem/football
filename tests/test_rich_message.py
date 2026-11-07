@@ -120,6 +120,30 @@ class TestRichMessage(unittest.IsolatedAsyncioTestCase):
         msg_none = build_game_rich_message(self.game_without_loc, self.participants)
         self.assertIsNone(msg_none)
 
+    async def test_send_game_message_with_payments(self):
+        bot = AsyncMock()
+        mock_result = MagicMock(message_id=999)
+        bot.send_message = AsyncMock(return_value=mock_result)
+
+        game = dict(self.game_with_loc)
+        game["status"] = "payment_collection"
+        game["price"] = 60
+        payments = [
+            {"participant_id": self.participants[0]["_id"], "status": "paid"},
+            {"participant_id": self.participants[1]["_id"], "status": "not_played"},
+        ]
+
+        sent = await send_game_message(
+            bot, chat_id=-1001, game=game, participants=self.participants, payments=payments
+        )
+        self.assertEqual(sent.message_id, 999)
+        call_kwargs = bot.send_message.call_args[1]
+        text = call_kwargs["text"]
+        self.assertIn("✅ оплатил", text)
+        self.assertIn("🚫 не играл", text)
+        self.assertIn("💳 Оплатили: <b>1</b>", text)
+        self.assertIn("🚫 Не играли: <b>1</b>", text)
+
     async def test_send_game_message_calls_send_message_directly(self):
         bot = AsyncMock()
         mock_result = MagicMock(message_id=999)

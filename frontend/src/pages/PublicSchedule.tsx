@@ -140,6 +140,8 @@ export function PublicSchedule({ onGoToCabinet }: { onGoToCabinet: (gameId?: str
                               ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                               : g.status === "game_started"
                               ? "bg-teal-500/10 text-teal-400 border border-teal-500/20 animate-pulse"
+                              : g.status === "finished"
+                              ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
                               : g.status === "payment_collection"
                               ? "bg-sky-500/10 text-sky-400 border border-sky-500/20"
                               : "bg-slate-700 text-slate-300"
@@ -239,8 +241,12 @@ export function PublicSchedule({ onGoToCabinet }: { onGoToCabinet: (gameId?: str
                       >
                         {g.status === "game_started"
                           ? "Матч идет ⚽"
+                          : g.status === "finished"
+                          ? "Матч завершен 🏁"
                           : g.status === "payment_collection"
                           ? "Оплата 💳"
+                          : g.status === "closed"
+                          ? "В архиве ✅"
                           : "Записаться ⚽"}
                       </button>
                     </div>

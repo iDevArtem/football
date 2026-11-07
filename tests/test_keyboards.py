@@ -22,10 +22,14 @@ class TestKeyboards(unittest.TestCase):
                 self.assertLessEqual(len(btn.callback_data.encode("utf-8")), 64)
                 
         self.assertTrue(any("Опубликовать во всех" in t for t in button_texts))
+        self.assertTrue(any("Переотправить во всех" in t for t in button_texts))
         self.assertTrue(any("✅" in t and "Основной состав" in t for t in button_texts))
+        self.assertTrue(any("🔄 Вниз" in t for t in button_texts))
         self.assertTrue(any("➕" in t and "Резервный состав" in t for t in button_texts))
         self.assertIn(f"admin:{game_id}:pub_all", callbacks)
+        self.assertIn(f"admin:{game_id}:repub_all", callbacks)
         self.assertIn(f"admin:{game_id}:unpub:-1001234567890", callbacks)
+        self.assertIn(f"admin:{game_id}:repub:-1001234567890", callbacks)
         self.assertIn(f"admin:{game_id}:pub:-1009876543210", callbacks)
 
     def test_admin_keyboard_includes_broadcast(self):

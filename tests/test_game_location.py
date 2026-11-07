@@ -264,7 +264,7 @@ class TestGameLocation(unittest.IsolatedAsyncioTestCase):
         message = MagicMock()
         message.from_user = MagicMock(id=111, first_name="Admin", username="admin")
         message.chat = MagicMock(id=-100123, type="supergroup", title="Football Group")
-        message.text = "/new_game 2026-11-06 19:00"
+        message.text = "/new_game 2099-11-06 19:00"
         message.bot = MagicMock()
         message.bot.send_venue = AsyncMock()
         message.reply = AsyncMock()

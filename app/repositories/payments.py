@@ -55,6 +55,46 @@ class PaymentRepository:
                     upsert=True,
                 )
 
+    async def record_cash_payments(self, game_id: str, amount: int, excluded_participant_ids: set[str] | None = None) -> None:
+        now = datetime.now(timezone.utc)
+        participants = await self.db.participants.find({
+            "game_id": ObjectId(game_id),
+            "status": "confirmed",
+        }).to_list(None)
+        excluded = excluded_participant_ids or set()
+        for participant in participants:
+            pid = participant["_id"]
+            if str(pid) in excluded:
+                set_fields = {
+                    "amount": 0,
+                    "status": "not_played",
+                    "payment_method": "cash",
+                    "confirmed_by_admin": True,
+                    "confirmed_by_user": False,
+                    "updated_at": now,
+                }
+            else:
+                set_fields = {
+                    "amount": amount,
+                    "status": "paid",
+                    "payment_method": "cash",
+                    "confirmed_by_admin": True,
+                    "confirmed_by_user": True,
+                    "updated_at": now,
+                }
+            await self.db.payments.update_one(
+                {"game_id": ObjectId(game_id), "participant_id": pid},
+                {
+                    "$set": set_fields,
+                    "$setOnInsert": {
+                        "game_id": ObjectId(game_id),
+                        "participant_id": pid,
+                        "created_at": now,
+                    },
+                },
+                upsert=True,
+            )
+
     async def mark_paid_by_user(self, game_id: str, telegram_id: int) -> bool:
         participant = await self.db.participants.find_one({
             "game_id": ObjectId(game_id),

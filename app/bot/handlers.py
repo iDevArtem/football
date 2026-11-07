@@ -4,7 +4,14 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, CallbackQuery, ChatMemberUpdated, LinkPreviewOptions
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    ChatMemberUpdated,
+    LinkPreviewOptions,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from datetime import datetime, timezone
 
@@ -28,6 +35,7 @@ from app.bot.keyboards import (
     card_confirmation_keyboard,
     admin_cancel_edit_keyboard,
     admin_finish_game_keyboard,
+    admin_post_finish_keyboard,
 )
 from app.services.render import format_game_message, format_payments_message
 from app.services.rich_message import (
@@ -154,7 +162,7 @@ async def update_game_message(bot, game: dict) -> None:
     game_id = str(game["_id"])
     participants = await ParticipantRepository(db).list_by_game(game_id)
     payments = []
-    if game.get("status") == "payment_collection":
+    if game.get("status") in ("payment_collection", "closed"):
         payments = await PaymentRepository(db).list_by_game(game_id)
     text = format_game_message(game, participants, payments)
     reply_markup = game_keyboard(
@@ -245,7 +253,10 @@ async def cleanup_friend_input(message: Message, data: dict) -> None:
 
 async def send_private_message(bot, user_id: int, text: str, **kwargs):
     try:
-        return await bot.send_message(chat_id=user_id, text=text, **kwargs)
+        res = bot.send_message(chat_id=user_id, text=text, **kwargs)
+        if hasattr(res, "__await__"):
+            return await res
+        return res
     except (TelegramForbiddenError, TelegramBadRequest):
         return None
 
@@ -341,7 +352,9 @@ async def render_broadcast_menu(bot, user_id: int, game_id: str, message: Messag
     kb = broadcast_groups_keyboard(game_id, chats, linked_ids)
     text = (
         "📢 <b>Публикация игры в группах</b>\n\n"
-        "Нажмите на группу, чтобы опубликовать (➕) или отозвать (✅) карточку матча:\n"
+        "• ➕ — опубликовать карточку в чате\n"
+        "• ✅ — отозвать (удалить) карточку из чата\n"
+        "• 🔄 Вниз — переотправить свежую карточку вниз чата (старая удаляется)\n"
     )
     if not chats:
         text += "\n<i>Нет доступных групп. Добавьте бота в группу или напишите в ней сообщение.</i>"
@@ -714,13 +727,16 @@ async def edit_players(message: Message) -> None:
     await edit_format_value(message, field="players")
 
 
-@router.message(Command("payments", "finish_game"))
+@router.message(Command("payments"))
 async def payments(message: Message) -> None:
     if not is_admin(message.from_user.id):
         await message.reply("❌ Только админ.")
         return
     game = await get_active_game_or_reply(message)
     if not game:
+        return
+    if game.get("status") not in {"finished", "payment_collection"}:
+        await message.reply("❌ Сначала завершите игру и отправьте фотоотчёт (/finish_game), после чего можно запускать сбор оплат.")
         return
     game_id = str(game["_id"])
     hourly_rate = game.get("hourly_rate", 600)
@@ -736,6 +752,36 @@ async def payments(message: Message) -> None:
     else:
         if is_group_chat(message):
             await delete_message_safely(message)
+
+
+@router.message(Command("finish_game"))
+async def finish_game_cmd(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await message.reply("❌ Только админ.")
+        return
+    game = await get_active_game_or_reply(message)
+    if not game:
+        return
+    game_id = str(game["_id"])
+    if game.get("status") in {"cancelled", "finished", "payment_collection", "closed"}:
+        await message.reply(f"❌ Игра уже в статусе «{game.get('status')}».")
+        return
+    await state.set_state(AdminFinishGameState.waiting_content)
+    await state.update_data(game_id=game_id)
+    sent = await send_private_message(
+        message.bot,
+        message.from_user.id,
+        "🏁 <b>Завершение игры</b>\n\n"
+        "Отправьте <b>фото</b>, <b>видео</b> или <b>текстовый отчет</b> (счёт, яркие моменты, комментарий).\n"
+        "Медиа и текст прикрепятся прямо к карточке матча во всех группах.\n\n"
+        "<i>Или выберите действие ниже:</i>",
+        reply_markup=admin_finish_game_keyboard(game_id),
+        parse_mode="HTML",
+    )
+    if not sent:
+        await temporary_reply(message, "❌ Напиши боту /start в личке, чтобы завершить игру.")
+    elif is_group_chat(message):
+        await delete_message_safely(message)
 
 
 async def execute_start_payments(
@@ -827,6 +873,82 @@ async def execute_start_payments(
         await callback.answer("Сбор оплат запущен!")
 
 
+async def execute_cash_close_game(
+    bot,
+    game_id: str,
+    minutes: int,
+    edit_message_fn=None,
+    callback=None,
+    excluded_participant_ids: set[str] | None = None,
+) -> None:
+    db = get_db()
+    game_repo = GameRepository(db)
+    game = await game_repo.get(game_id)
+    if not game:
+        return
+    hourly_rate = game.get("hourly_rate", 600)
+    total_cost = int((minutes / 60) * hourly_rate)
+    participants_repo = ParticipantRepository(db)
+    if excluded_participant_ids:
+        confirmed_participants = await participants_repo.list_by_game(game_id)
+        confirmed_participants = [p for p in confirmed_participants if p.get("status") == "confirmed"]
+        excluded_set = set(str(pid) for pid in excluded_participant_ids)
+        playing_count = len([p for p in confirmed_participants if str(p["_id"]) not in excluded_set])
+        if playing_count <= 0:
+            playing_count = await participants_repo.count_confirmed(game_id)
+    else:
+        excluded_set = set()
+        playing_count = await participants_repo.count_confirmed(game_id)
+
+    import math
+    per_player = math.ceil(total_cost / playing_count) if playing_count > 0 else 0
+
+    now = datetime.now(timezone.utc)
+    from bson import ObjectId
+    await db.games.update_one(
+        {"_id": ObjectId(game_id)},
+        {"$set": {
+            "status": "closed",
+            "closed_at": now,
+            "duration_minutes": minutes,
+            "total_cost": total_cost,
+            "price": per_player,
+            "payment_method": "cash",
+            "updated_at": now,
+        }}
+    )
+
+    pay_repo = PaymentRepository(db)
+    await pay_repo.record_cash_payments(game_id, per_player, excluded_participant_ids=excluded_set)
+    fresh = await game_repo.get(game_id)
+    await update_game_message(bot, fresh)
+    try:
+        from app.api.sync import trigger_sync
+        trigger_sync(game_id)
+    except Exception:
+        pass
+
+    duration_hours = round(minutes / 60, 1)
+    if duration_hours.is_integer():
+        duration_hours = int(duration_hours)
+
+    excluded_str = f" (не играли: {len(excluded_set)})" if excluded_set else ""
+    msg_text = (
+        f"✅ <b>Игра закрыта (оплата наличными)!</b>\n\n"
+        f"⏱️ Длительность: <b>{duration_hours} ч</b> ({minutes} мин)\n"
+        f"💰 Аренда поля: <b>{total_cost} грн</b>\n"
+        f"🏃 Играло: <b>{playing_count} чел</b>{excluded_str}\n"
+        f"💵 С каждого: <b>{per_player} грн</b>\n\n"
+        f"Карточки игры во всех группах обновлены."
+    )
+    if edit_message_fn:
+        from app.bot.keyboards import admin_game_keyboard
+        markup = admin_game_keyboard(game_id, friends_allowed=fresh.get("friends_allowed", False), status=fresh.get("status"))
+        await edit_message_fn(msg_text, markup)
+    if callback:
+        await callback.answer("Игра закрыта (оплачено наличными) ✅")
+
+
 @router.callback_query(F.data.startswith("admin:"))
 async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
     _, game_id, action = callback.data.split(":", 2)
@@ -910,13 +1032,14 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
         return
 
-    if action == "pub_all":
+    if action in {"pub_all", "repub_all"}:
         chat_repo = ChatRepository(db)
         chats = await chat_repo.list_active_chats()
         fresh = await game_repo.get(game_id)
-        linked_ids = {m["chat_id"] for m in fresh.get("messages", [])}
+        linked_messages = list(fresh.get("messages", []))
+        linked_ids = {m["chat_id"] for m in linked_messages}
         participants = await ParticipantRepository(db).list_by_game(game_id)
-        text = format_game_message(fresh, participants)
+        payments = await PaymentRepository(db).list_by_game(game_id) if fresh.get("status") == "payment_collection" else []
         markup = game_keyboard(
             game_id,
             fresh.get("friends_allowed", False),
@@ -924,23 +1047,65 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             location=fresh.get("location"),
         )
         link_preview = get_game_link_preview_options(fresh)
+
+        if action == "pub_all":
+            for chat in chats:
+                cid = chat["chat_id"]
+                if cid not in linked_ids:
+                    try:
+                        sent = await send_game_message(
+                            callback.bot,
+                            cid,
+                            fresh,
+                            participants,
+                            payments=payments,
+                            reply_markup=markup,
+                            link_preview_options=link_preview,
+                        )
+                        await game_repo.add_linked_message(game_id, cid, sent.message_id, chat.get("title", str(cid)))
+                    except (TelegramBadRequest, TelegramForbiddenError):
+                        await chat_repo.set_active_status(cid, False)
+            await render_broadcast_menu(callback.bot, callback.from_user.id, game_id, callback.message)
+            await callback.answer("Опубликовано во всех группах")
+            return
+
+        # repub_all: переотправляем во все группы, где карточка уже была опубликована
         for chat in chats:
             cid = chat["chat_id"]
-            if cid not in linked_ids:
+            if cid in linked_ids:
+                chat_title = chat.get("title", str(cid))
+                old_entries = [m for m in linked_messages if m["chat_id"] == cid]
                 try:
                     sent = await send_game_message(
                         callback.bot,
                         cid,
                         fresh,
                         participants,
+                        payments=payments,
                         reply_markup=markup,
                         link_preview_options=link_preview,
                     )
-                    await game_repo.add_linked_message(game_id, cid, sent.message_id, chat.get("title", str(cid)))
+                    # Удаляем старые сообщения из чата
+                    for old_m in old_entries:
+                        try:
+                            await callback.bot.delete_message(chat_id=cid, message_id=old_m["message_id"])
+                        except (TelegramBadRequest, TelegramForbiddenError):
+                            try:
+                                await callback.bot.edit_message_reply_markup(chat_id=cid, message_id=old_m["message_id"], reply_markup=None)
+                            except Exception:
+                                pass
+                        if old_m.get("venue_message_id"):
+                            try:
+                                await callback.bot.delete_message(chat_id=cid, message_id=old_m["venue_message_id"])
+                            except Exception:
+                                pass
+                    await game_repo.remove_linked_message(game_id, cid)
+                    await game_repo.add_linked_message(game_id, cid, sent.message_id, chat_title)
                 except (TelegramBadRequest, TelegramForbiddenError):
                     await chat_repo.set_active_status(cid, False)
+
         await render_broadcast_menu(callback.bot, callback.from_user.id, game_id, callback.message)
-        await callback.answer("Опубликовано во всех группах")
+        await callback.answer("Переотправлено во всех группах")
         return
 
     if action.startswith("pub:"):
@@ -950,12 +1115,14 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         chat_title = next((c.get("title", str(target_chat_id)) for c in chats if c["chat_id"] == target_chat_id), "Группа")
         fresh = await game_repo.get(game_id)
         participants = await ParticipantRepository(db).list_by_game(game_id)
+        payments = await PaymentRepository(db).list_by_game(game_id) if fresh.get("status") == "payment_collection" else []
         try:
             sent = await send_game_message(
                 callback.bot,
                 target_chat_id,
                 fresh,
                 participants,
+                payments=payments,
                 reply_markup=game_keyboard(
                     game_id,
                     fresh.get("friends_allowed", False),
@@ -966,6 +1133,53 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             )
             await game_repo.add_linked_message(game_id, target_chat_id, sent.message_id, chat_title)
             await callback.answer(f"Опубликовано в {chat_title}")
+        except (TelegramBadRequest, TelegramForbiddenError):
+            await chat_repo.set_active_status(target_chat_id, False)
+            await callback.answer("Не удалось отправить сообщение в чат", show_alert=True)
+        await render_broadcast_menu(callback.bot, callback.from_user.id, game_id, callback.message)
+        return
+
+    if action.startswith("repub:"):
+        target_chat_id = int(action.split(":", 1)[1])
+        chat_repo = ChatRepository(db)
+        chats = await chat_repo.list_active_chats()
+        chat_title = next((c.get("title", str(target_chat_id)) for c in chats if c["chat_id"] == target_chat_id), "Группа")
+        fresh = await game_repo.get(game_id)
+        participants = await ParticipantRepository(db).list_by_game(game_id)
+        payments = await PaymentRepository(db).list_by_game(game_id) if fresh.get("status") == "payment_collection" else []
+
+        old_entries = [m for m in fresh.get("messages", []) if m["chat_id"] == target_chat_id]
+        try:
+            sent = await send_game_message(
+                callback.bot,
+                target_chat_id,
+                fresh,
+                participants,
+                payments=payments,
+                reply_markup=game_keyboard(
+                    game_id,
+                    fresh.get("friends_allowed", False),
+                    fresh.get("status"),
+                    location=fresh.get("location"),
+                ),
+                link_preview_options=get_game_link_preview_options(fresh),
+            )
+            for old_m in old_entries:
+                try:
+                    await callback.bot.delete_message(chat_id=target_chat_id, message_id=old_m["message_id"])
+                except (TelegramBadRequest, TelegramForbiddenError):
+                    try:
+                        await callback.bot.edit_message_reply_markup(chat_id=target_chat_id, message_id=old_m["message_id"], reply_markup=None)
+                    except Exception:
+                        pass
+                if old_m.get("venue_message_id"):
+                    try:
+                        await callback.bot.delete_message(chat_id=target_chat_id, message_id=old_m["venue_message_id"])
+                    except Exception:
+                        pass
+            await game_repo.remove_linked_message(game_id, target_chat_id)
+            await game_repo.add_linked_message(game_id, target_chat_id, sent.message_id, chat_title)
+            await callback.answer(f"Переотправлено вниз в {chat_title}")
         except (TelegramBadRequest, TelegramForbiddenError):
             await chat_repo.set_active_status(target_chat_id, False)
             await callback.answer("Не удалось отправить сообщение в чат", show_alert=True)
@@ -1071,8 +1285,8 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             return
 
         existing_data = PENDING_ROSTER_VERIFICATIONS.get(callback.from_user.id)
-        if not existing_data or existing_data.get("game_id") != game_id:
-            PENDING_ROSTER_VERIFICATIONS[callback.from_user.id] = {"game_id": game_id, "excluded_ids": set()}
+        if not existing_data or existing_data.get("game_id") != game_id or existing_data.get("is_cash"):
+            PENDING_ROSTER_VERIFICATIONS[callback.from_user.id] = {"game_id": game_id, "excluded_ids": set(), "is_cash": False}
 
         excluded_ids = PENDING_ROSTER_VERIFICATIONS[callback.from_user.id]["excluded_ids"]
         await edit_admin_message(
@@ -1084,10 +1298,37 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
         return
 
+    if action == "confirm_cash_payments":
+        from app.bot.keyboards import verify_roster_keyboard
+        from bson import ObjectId
+        confirmed_cursor = db.participants.find({"game_id": ObjectId(game_id), "status": "confirmed"}).sort("position", 1)
+        confirmed = [p async for p in confirmed_cursor]
+        if not confirmed:
+            await callback.answer("В основе нет игроков для расчета", show_alert=True)
+            return
+
+        PENDING_ROSTER_VERIFICATIONS[callback.from_user.id] = {
+            "game_id": game_id,
+            "excluded_ids": set(),
+            "is_cash": True,
+        }
+
+        excluded_ids = PENDING_ROSTER_VERIFICATIONS[callback.from_user.id]["excluded_ids"]
+        await edit_admin_message(
+            "👥 <b>Проверка состава (оплата наличными)</b>\n\n"
+            "Отметьте тех, кто <b>не играл</b> (нажмите на игрока, чтобы исключить).\n"
+            "Сумма аренды поля будет поделена поровну только между отмеченными ✅.",
+            verify_roster_keyboard(game_id, confirmed, excluded_ids),
+        )
+        await callback.answer()
+        return
+
     if action == "pay_dur_menu":
         from bson import ObjectId
         total_confirmed = await db.participants.count_documents({"game_id": ObjectId(game_id), "status": "confirmed"})
-        excluded_ids = PENDING_ROSTER_VERIFICATIONS.get(callback.from_user.id, {}).get("excluded_ids", set())
+        roster_data = PENDING_ROSTER_VERIFICATIONS.get(callback.from_user.id, {})
+        excluded_ids = roster_data.get("excluded_ids", set())
+        is_cash = roster_data.get("is_cash", False)
         playing_count = total_confirmed - len(excluded_ids)
         if playing_count <= 0:
             await callback.answer("Все игроки исключены! Отметьте хотя бы одного игравшего.", show_alert=True)
@@ -1095,17 +1336,32 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
 
         hourly_rate = game.get("hourly_rate", 600)
         excluded_note = f" (не играли: {len(excluded_ids)})" if excluded_ids else ""
+        back_action = "confirm_cash_payments" if is_cash else "confirm_payments"
+        title_prefix = "💵 <b>Оплата наличными</b>\n\n" if is_cash else ""
         await edit_admin_message(
-            f"⏱ <b>Сколько времени играли?</b>\n\n"
+            f"{title_prefix}⏱ <b>Сколько времени играли?</b>\n\n"
             f"Состав: <b>{playing_count} чел</b>{excluded_note}\n"
             f"Стоимость аренды поля будет поделена поровну между игравшими.",
-            payment_duration_keyboard(game_id, hourly_rate),
+            payment_duration_keyboard(game_id, hourly_rate, back_action=back_action),
         )
         await callback.answer()
         return
 
     if action.startswith("paydur:"):
         minutes = int(action.split(":", 1)[1])
+        roster_data = PENDING_ROSTER_VERIFICATIONS.get(callback.from_user.id, {})
+        if roster_data.get("is_cash"):
+            excluded_ids = roster_data.get("excluded_ids", set())
+            await execute_cash_close_game(
+                callback.bot,
+                game_id,
+                minutes,
+                edit_message_fn=edit_admin_message,
+                callback=callback,
+                excluded_participant_ids=excluded_ids,
+            )
+            return
+
         settings_repo = SettingsRepository(db)
         card_details = await settings_repo.get_default_payment_details()
         card_num = card_details.get("card_number") or "не указана"
@@ -1229,8 +1485,37 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
             trigger_sync(game_id)
         except Exception:
             pass
-        await delete_message_safely(callback.message)
+        post_finish_text = (
+            "🏁 <b>Игра завершена!</b>\n\n"
+            "Теперь можно перейти к расчёту аренды и сбору оплат."
+        )
+        post_finish_kb = admin_post_finish_keyboard(game_id)
+        try:
+            await callback.message.edit_text(post_finish_text, reply_markup=post_finish_kb, parse_mode="HTML")
+        except TelegramBadRequest:
+            await send_private_message(callback.bot, callback.from_user.id, post_finish_text, reply_markup=post_finish_kb, parse_mode="HTML")
         await callback.answer("Игра завершена 🏁")
+        return
+
+    if action == "confirm_close_payments":
+        await edit_admin_message(
+            "Подтвердить завершение сбора оплат? Карточка игры будет архивирована, кнопки оплаты удалятся.",
+            admin_confirm_keyboard(game_id, "close_payments"),
+        )
+        await callback.answer()
+        return
+
+    if action == "do_close_payments":
+        await game_repo.close_game(game_id)
+        game = await game_repo.get(game_id)
+        await update_game_message(callback.bot, game)
+        try:
+            from app.api.sync import trigger_sync
+            trigger_sync(game_id)
+        except Exception:
+            pass
+        await delete_message_safely(callback.message)
+        await callback.answer("Сбор оплат завершён ✅")
         return
 
     await callback.answer("Неизвестное действие", show_alert=True)
@@ -1254,8 +1539,8 @@ async def game_callback(callback: CallbackQuery, state: FSMContext) -> None:
     if game.get("status") == "registration_closed" and action in {"join", "add_friend"}:
         await callback.answer("Запись закрыта", show_alert=True)
         return
-    if game.get("status") in {"game_started", "payment_collection"} and action in {"join", "decline", "add_friend", "cancel_friend"}:
-        await callback.answer("Матч уже идет или начался сбор оплат", show_alert=True)
+    if game.get("status") in {"game_started", "finished", "payment_collection", "closed"} and action in {"join", "decline", "add_friend", "cancel_friend"}:
+        await callback.answer("Матч завершен или уже идет", show_alert=True)
         return
 
     await user_repo.upsert_from_telegram(callback.from_user, is_admin=is_admin(callback.from_user.id))
@@ -1709,14 +1994,28 @@ async def admin_finish_game_content(message: Message, state: FSMContext) -> None
     except Exception:
         pass
 
+    post_finish_text = (
+        "🏁 <b>Игра завершена! Отчёт опубликован в группах.</b>\n\n"
+        "Теперь можно перейти к расчёту аренды и сбору оплат."
+    )
+    post_finish_kb = admin_post_finish_keyboard(game_id)
     if admin_message_id:
         try:
-            await message.bot.delete_message(
+            await message.bot.edit_message_text(
                 chat_id=message.chat.id,
                 message_id=admin_message_id,
+                text=post_finish_text,
+                reply_markup=post_finish_kb,
+                parse_mode="HTML",
             )
-        except Exception:
+            return
+        except TelegramBadRequest:
             pass
+    await message.answer(
+        post_finish_text,
+        reply_markup=post_finish_kb,
+        parse_mode="HTML",
+    )
 
 
 @router.message(AdminEditState.waiting_location, F.venue)
@@ -1836,8 +2135,9 @@ async def toggle_roster_verification(callback: CallbackQuery) -> None:
     confirmed = [p async for p in confirmed_cursor]
 
     from app.bot.keyboards import verify_roster_keyboard
+    title_text = "👥 <b>Проверка состава (оплата наличными)</b>\n\n" if data.get("is_cash") else "👥 <b>Проверка состава перед расчетом</b>\n\n"
     text = (
-        "👥 <b>Проверка состава перед расчетом</b>\n\n"
+        title_text +
         "Отметьте тех, кто <b>не играл</b> (нажмите на игрока, чтобы исключить).\n"
         "Сумма аренды поля будет поделена поровну только между отмеченными ✅."
     )
@@ -1850,6 +2150,44 @@ async def toggle_roster_verification(callback: CallbackQuery) -> None:
     except Exception:
         pass
     await callback.answer()
+
+
+async def check_and_notify_all_paid(bot, game_id: str) -> None:
+    db = get_db()
+    game_repo = GameRepository(db)
+    game = await game_repo.get(game_id)
+    if not game or game.get("status") != "payment_collection":
+        return
+    part_repo = ParticipantRepository(db)
+    confirmed_parts = [p for p in await part_repo.list_by_game(game_id) if p.get("status") == "confirmed"]
+    if not confirmed_parts:
+        return
+    pay_repo = PaymentRepository(db)
+    payments = await pay_repo.list_by_game(game_id)
+    pay_map = {str(p["participant_id"]): p.get("status", "pending") for p in payments}
+
+    paid_count = 0
+    for p in confirmed_parts:
+        st = pay_map.get(str(p["_id"]), "pending")
+        if st == "pending":
+            return
+        if st == "paid":
+            paid_count += 1
+    if paid_count == 0:
+        return
+
+    if await game_repo.try_mark_all_paid_notified(game_id):
+        admin_id = game.get("created_by")
+        if admin_id:
+            title = game.get("title", "Футбол")
+            text = (
+                f"🎉 <b>Все игроки отметили оплату матча «{html.escape(title)}»!</b>\n\n"
+                "Проверьте выписку по карте и завершите сбор оплат."
+            )
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Завершить сбор оплат", callback_data=f"admin:{game_id}:do_close_payments")]
+            ])
+            await send_private_message(bot, admin_id, text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("pay:"))
@@ -1897,6 +2235,8 @@ async def payment_callback(callback: CallbackQuery) -> None:
     game = await game_repo.get(game_id)
     await update_game_message(callback.bot, game)
     await callback.answer(answer_text)
+    if action == "paid":
+        await check_and_notify_all_paid(callback.bot, game_id)
 
 
 @router.callback_query(F.data.startswith("pfc:"))
@@ -1966,6 +2306,8 @@ async def friend_payment_callback(callback: CallbackQuery) -> None:
     except TelegramBadRequest:
         pass
     await callback.answer("Оплата друга обновлена")
+    if action == "paid":
+        await check_and_notify_all_paid(callback.bot, game_id)
 
 
 @router.callback_query(F.data == "noop")

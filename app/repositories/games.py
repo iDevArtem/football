@@ -8,6 +8,7 @@ ACTIVE_STATUSES = [
     "friends_allowed",
     "full",
     "game_started",
+    "finished",
     "payment_collection",
 ]
 
@@ -125,7 +126,7 @@ class GameRepository:
         # Manual opening means friends can be added immediately, not only after friends_allowed_after.
         now = datetime.now(timezone.utc)
         await self.db.games.update_one(
-            {"_id": ObjectId(game_id), "status": {"$nin": ["cancelled", "payment_collection", "closed"]}},
+            {"_id": ObjectId(game_id), "status": {"$nin": ["cancelled", "payment_collection", "finished", "closed"]}},
             {"$set": {
                 "friends_allowed": True,
                 "friends_allowed_after": now,
@@ -136,7 +137,7 @@ class GameRepository:
 
     async def close_friends(self, game_id: str) -> None:
         game = await self.get(game_id)
-        if not game or game.get("status") in {"cancelled", "payment_collection", "closed"}:
+        if not game or game.get("status") in {"cancelled", "payment_collection", "finished", "closed"}:
             return
         now = datetime.now(timezone.utc)
         status = "registration_open" if game.get("status") == "friends_allowed" else game.get("status", "registration_open")
@@ -150,11 +151,32 @@ class GameRepository:
         )
 
     async def set_status(self, game_id: str, status: str) -> bool:
+        set_fields = {"status": status, "updated_at": datetime.now(timezone.utc)}
+        if status == "payment_collection":
+            set_fields["all_paid_notified"] = False
         res = await self.db.games.update_one(
             {"_id": ObjectId(game_id)},
-            {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}},
+            {"$set": set_fields},
         )
         return bool(res.matched_count > 0)
+
+    async def try_mark_all_paid_notified(self, game_id: str) -> bool:
+        res = await self.db.games.update_one(
+            {"_id": ObjectId(game_id), "all_paid_notified": {"$ne": True}},
+            {"$set": {"all_paid_notified": True}},
+        )
+        return bool(res.modified_count > 0)
+
+    async def close_game(self, game_id: str) -> None:
+        now = datetime.now(timezone.utc)
+        await self.db.games.update_one(
+            {"_id": ObjectId(game_id)},
+            {"$set": {
+                "status": "closed",
+                "closed_at": now,
+                "updated_at": now,
+            }},
+        )
 
     async def set_payment_details(self, game_id: str, card_number: str, recipient: str) -> bool:
         res = await self.db.games.update_one(
@@ -181,7 +203,7 @@ class GameRepository:
 
     async def close_registration(self, game_id: str) -> None:
         await self.db.games.update_one(
-            {"_id": ObjectId(game_id), "status": {"$nin": ["cancelled", "payment_collection"]}},
+            {"_id": ObjectId(game_id), "status": {"$nin": ["cancelled", "payment_collection", "finished", "closed"]}},
             {"$set": {
                 "status": "registration_closed",
                 "closed_at": datetime.now(timezone.utc),
@@ -214,7 +236,7 @@ class GameRepository:
 
     async def open_registration(self, game_id: str) -> None:
         game = await self.get(game_id)
-        if not game or game.get("status") in {"payment_collection", "closed"}:
+        if not game or game.get("status") in {"payment_collection", "finished", "closed"}:
             return
         status = "friends_allowed" if game.get("friends_allowed") else "registration_open"
         await self.db.games.update_one(

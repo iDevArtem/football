@@ -138,6 +138,7 @@ async def test_admin_start_payment_with_card(app, admin_token):
         "_id": ObjectId(game_id),
         "title": "Матч",
         "hourly_rate": 600,
+        "status": "finished",
         "messages": [],
     }
     with patch("app.api.routers.admin.get_db") as mock_db, \
