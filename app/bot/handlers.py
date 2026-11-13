@@ -14,6 +14,7 @@ from aiogram.types import (
 )
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from datetime import datetime, timezone
+from bson import ObjectId
 
 from app.config.settings import get_settings
 from app.db.mongo import get_db
@@ -822,7 +823,6 @@ async def execute_start_payments(
     import math
     per_player = math.ceil(total_cost / playing_count) if playing_count > 0 else 0
 
-    from bson import ObjectId
     await db.games.update_one(
         {"_id": ObjectId(game_id)},
         {"$set": {
@@ -916,7 +916,6 @@ async def execute_cash_close_game(
     per_player = math.ceil(total_cost / playing_count) if playing_count > 0 else 0
 
     now = datetime.now(timezone.utc)
-    from bson import ObjectId
     await db.games.update_one(
         {"_id": ObjectId(game_id)},
         {"$set": {
@@ -1289,7 +1288,6 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
 
     if action == "confirm_payments":
         from app.bot.keyboards import verify_roster_keyboard
-        from bson import ObjectId
         cursor = db.participants.find({
             "game_id": ObjectId(game_id),
             "status": {"$in": ["confirmed", "reserve"]},
@@ -1321,7 +1319,6 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
 
     if action == "confirm_cash_payments":
         from app.bot.keyboards import verify_roster_keyboard
-        from bson import ObjectId
         cursor = db.participants.find({
             "game_id": ObjectId(game_id),
             "status": {"$in": ["confirmed", "reserve"]},
@@ -1350,7 +1347,6 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     if action == "pay_dur_menu":
-        from bson import ObjectId
         participants_cursor = db.participants.find({
             "game_id": ObjectId(game_id),
             "status": {"$in": ["confirmed", "reserve"]},
@@ -2152,7 +2148,6 @@ async def toggle_roster_verification(callback: CallbackQuery) -> None:
         return
     _, game_id, participant_id = parts
     db = get_db()
-    from bson import ObjectId
 
     data = PENDING_ROSTER_VERIFICATIONS.get(callback.from_user.id)
     if not data or data.get("game_id") != game_id:
