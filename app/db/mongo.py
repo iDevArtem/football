@@ -8,7 +8,11 @@ _db = None
 async def init_mongo():
     global _client, _db
     settings = get_settings()
-    _client = AsyncMongoClient(settings.mongo_url)
+    _client = AsyncMongoClient(
+        settings.mongo_url,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=5000,
+    )
     try:
         default_db = _client.get_default_database()
         if default_db is not None and default_db.name not in ("admin", "local", "config"):
