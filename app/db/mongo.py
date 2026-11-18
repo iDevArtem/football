@@ -9,7 +9,14 @@ async def init_mongo():
     global _client, _db
     settings = get_settings()
     _client = AsyncMongoClient(settings.mongo_url)
-    _db = _client[settings.mongo_db_name]
+    try:
+        default_db = _client.get_default_database()
+        if default_db is not None and default_db.name not in ("admin", "local", "config"):
+            _db = default_db
+        else:
+            _db = _client[settings.mongo_db_name]
+    except Exception:
+        _db = _client[settings.mongo_db_name]
     await create_indexes(_db)
     return _db
 

@@ -1,6 +1,6 @@
 // frontend/src/api/client.ts
 
-export const API_BASE = "";
+export const API_BASE: string = ((import.meta as any).env?.VITE_API_BASE_URL as string) || "";
 
 export function getToken(): string | null {
   return localStorage.getItem("football_jwt");

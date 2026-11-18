@@ -11,7 +11,7 @@
 - **MongoDB + PyMongo 4.10.1 (`AsyncMongoClient`)**: асинхронный драйвер для работы с базой данных.
 - **APScheduler 3.10.4**: планировщик фоновых задач (периодическое открытие добавления друзей).
 - **Pydantic 2.9.2 & pydantic-settings 2.6.1**: типизированная конфигурация из `.env`.
-- **Docker & Docker Compose**: контейнеризация бота и MongoDB 8.0.
+- **Docker & Coolify**: сборка напрямую из Git через Dockerfile для каждого сервиса, управление нативной базой MongoDB и доменом/SSL через Coolify UI.
 
 ---
 
@@ -33,8 +33,10 @@ football_bot/
 │   ├── services/              # Бизнес-логика: рендеринг сообщений и планировщик
 │   └── utils/                 # Утилиты дат и временных зон
 ├── requirements.txt           # Зависимости проекта
-├── Dockerfile                 # Сборка образа бота
-├── docker-compose.yml         # Сервисы bot и mongodb
+├── Dockerfile                 # Сборка образа бэкенда
+├── frontend/                  # Клиентская часть (Telegram Mini App)
+│   ├── Dockerfile             # Сборка образа фронтенда (Nginx)
+│   └── nginx.conf             # Конфигурация Nginx для SPA
 ├── .env.example               # Шаблон конфигурации
 └── README.md                  # Документация пользователя и команды
 ```
@@ -90,15 +92,21 @@ football_bot/
 
 ---
 
-## 🚀 Команды разработки и запуска
+## 🚀 Команды разработки и деплой
 
-- **Запуск через Docker Compose**:
-  ```bash
-  docker compose up --build
-  ```
+- **Деплой на Coolify**:
+  - **База данных**: нативный ресурс **Database** -> **MongoDB 8.0** (`football_bot`).
+  - **Backend (Telegram-бот + API)**: ресурс **Application** (`Dockerfile`), Base Directory `/`, Watch paths `/app/**`, `/requirements.txt`, Port `8000`, Healthcheck `/api/health`.
+  - **Frontend (Mini App SPA)**: ресурс **Application** (`Dockerfile`), Base Directory `/frontend`, Watch paths `/frontend/**`, Port `80`, Healthcheck `/healthz`.
+
 - **Локальный запуск (с локальной MongoDB)**:
   ```bash
+  # Запуск локальной MongoDB (если не запущена):
+  docker run -d --name local-mongo -p 27017:27017 mongo:8.0
+  # Запуск бэкенда:
   ./.venv/bin/python -m app.main
+  # Запуск фронтенда (в отдельном терминале):
+  npm --prefix frontend run dev
   ```
 - **Проверка синтаксиса и импортов**:
   ```bash

@@ -25,11 +25,12 @@ Telegram-бот для записи на футбольную игру в гру
 ## Стек
 
 - Python 3.12
+- FastAPI / Uvicorn
 - aiogram 3
-- MongoDB
-- PyMongo AsyncMongoClient
+- React 18 + Vite (Telegram Mini App)
+- MongoDB 8.0 (PyMongo AsyncMongoClient)
 - APScheduler
-- Docker Compose
+- Coolify (деплой из Git через Dockerfile)
 
 ## Быстрый запуск
 
@@ -44,10 +45,17 @@ BOT_TOKEN=telegram_bot_token
 ADMIN_TELEGRAM_IDS=123456789
 ```
 
-Запуск:
+Локальный запуск:
 
 ```bash
-docker compose up --build
+# 1. Запустить локальный MongoDB (если нет запущенного):
+docker run -d --name local-mongo -p 27017:27017 mongo:8.0
+
+# 2. Запустить бэкенд и бота:
+./.venv/bin/python -m app.main
+
+# 3. Запустить фронтенд в режиме разработки (в отдельном окне):
+npm --prefix frontend run dev
 ```
 
 ## Как получить BOT_TOKEN
@@ -239,6 +247,59 @@ max_players = teams_count * players_per_team
 Бот использует polling, поэтому webhook не нужен.
 
 Для продакшена можно заменить polling на webhook, но для MVP и закрытой футбольной группы polling проще.
+
+## Деплой в Coolify (Чистая архитектура)
+
+Каждый сервис деплоится в Coolify как отдельный нативный ресурс из GitHub репозитория:
+- **База данных**: Нативный ресурс `Database` -> `MongoDB` (8.0).
+- **Backend (Telegram-бот + API)**: Нативный ресурс `Application` (FastAPI / aiogram в режиме Long Polling).
+- **Frontend (Mini App SPA)**: Нативный ресурс `Application` (Nginx Alpine со статикой React/Vite).
+
+### 1. Создание базы данных (MongoDB)
+1. В проекте Coolify добавьте ресурс **Database** -> **MongoDB** (образ `mongo:8.0`).
+2. Задайте имя базы данных: `football_bot`.
+3. Скопируйте внутреннюю строку подключения (**Internal Connection URL**), например:
+   `mongodb://root:password@<mongo-host>:27017/?authSource=admin&directConnection=true`
+
+### 2. Создание Backend сервиса
+1. Добавьте ресурс **Application** -> подключите GitHub-репозиторий (через GitHub App).
+2. Настройки сборки:
+   - **Build Pack**: `Dockerfile`
+   - **Base Directory**: `/`
+   - **Dockerfile location**: `/Dockerfile`
+   - **Watch paths**: `/app/**`, `/requirements.txt`
+   - **Ports Exposes**: `8000`
+   - **Healthcheck Path**: `/api/health`
+3. Домен:
+   - Если бот и API доступны публично: назначьте домен (например, `https://api.your-domain.com`).
+   - Если API проксируется через единый домен — укажите соответствующий домен.
+4. **Environment Variables (Runtime only)**:
+   - `BOT_TOKEN`: токен Telegram-бота
+   - `BOT_USERNAME`: юзернейм бота
+   - `ADMIN_TELEGRAM_IDS`: Telegram ID админов через запятую
+   - `MONGO_URL`: Internal Connection URL от Coolify MongoDB
+   - `MONGO_DB_NAME`: `football_bot`
+   - `DEFAULT_TIMEZONE`: `Europe/Kyiv`
+   - `WEBAPP_URL`: публичный HTTPS URL фронтенда (например, `https://football.your-domain.com`)
+   - `JWT_SECRET`: строка от 32 случайных символов
+
+> [!NOTE]
+> Telegram-бот запускается в режиме Long Polling внутри lifespan FastAPI, поэтому внешние порты для вебхуков Telegram не требуются.
+
+### 3. Создание Frontend сервиса (React Mini App)
+1. Добавьте ресурс **Application** -> выберите тот же GitHub-репозиторий.
+2. Настройки сборки:
+   - **Build Pack**: `Dockerfile`
+   - **Base Directory**: `/frontend`
+   - **Dockerfile location**: `/Dockerfile`
+   - **Watch paths**: `/frontend/**`
+   - **Ports Exposes**: `80`
+   - **Healthcheck Path**: `/healthz`
+3. Домен:
+   - Назначьте домен приложения (например, `https://football.your-domain.com`).
+   - SSL и Traefik управляются Coolify автоматически.
+4. **Environment Variables**:
+   - `VITE_API_BASE_URL` (**Build-time variable**): URL вашего бэкенда (например, `https://api.your-domain.com` или оставьте пустым, если API проксируется по тому же домену через путь `/api`).
 
 ## v3.8: тихое управление через личку
 

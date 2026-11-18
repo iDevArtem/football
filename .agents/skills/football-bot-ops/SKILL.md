@@ -18,45 +18,37 @@ description: Run, test, monitor, and troubleshoot the Football Telegram Bot and 
 2. Проверьте обязательные параметры:
    - `BOT_TOKEN`: действительный токен от `@BotFather`.
    - `ADMIN_TELEGRAM_IDS`: ваш числовой Telegram ID (можно узнать через `@userinfobot`).
-   - `MONGO_URL`: `mongodb://mongodb:27017` (для Docker) или `mongodb://localhost:27017` (для локального запуска).
+   - `MONGO_URL`: `mongodb://localhost:27017` (для локальной разработки) или внутренняя строка Coolify.
 
 ---
 
-## 2. Запуск через Docker Compose (Рекомендуемый способ)
+## 2. Деплой и управление в Coolify
 
-1. **Сборка и запуск в фоновом режиме**:
-   ```bash
-   docker compose up --build -d
-   ```
-2. **Просмотр статуса контейнеров**:
-   ```bash
-   docker compose ps
-   ```
-3. **Чтение логов в реальном времени**:
-   ```bash
-   docker compose logs -f bot
-   ```
-4. **Остановка сервисов**:
-   ```bash
-   docker compose down
-   ```
+1. **База данных MongoDB**: создается через UI как нативный ресурс **Database ➔ MongoDB 8.0**.
+2. **Backend**: нативный ресурс **Application** с контекстом `/` и портом `8000`.
+3. **Frontend**: нативный ресурс **Application** с контекстом `/frontend` и портом `80`.
+4. **Просмотр логов**: через вкладку **Logs** каждого соответствующего ресурса в Coolify UI.
 
 ---
 
 ## 3. Локальный запуск для разработки
 
-1. **Запустите только MongoDB в контейнере**:
+1. **Запустите MongoDB в локальном Docker**:
    ```bash
-   docker compose up -d mongodb
+   docker run -d --name football-mongo -p 27017:27017 -v mongo_data:/data/db mongo:8.0
    ```
 2. **Активируйте виртуальное окружение и установите зависимости**:
    ```bash
    source .venv/bin/activate
    pip install -r requirements.txt
    ```
-3. **Запустите бота**:
+3. **Запустите бэкенд и бота**:
    ```bash
    python -m app.main
+   ```
+4. **Запустите фронтенд Mini App**:
+   ```bash
+   npm --prefix frontend run dev
    ```
 
 ---

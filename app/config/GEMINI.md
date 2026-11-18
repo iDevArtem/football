@@ -16,7 +16,7 @@
 | Переменная | Тип | По умолчанию | Описание |
 |---|---|---|---|
 | `BOT_TOKEN` | `str` | *обязательно* | Токен бота от `@BotFather`. |
-| `MONGO_URL` | `str` | `mongodb://localhost:27017` | Строка подключения к MongoDB. В docker-compose: `mongodb://mongodb:27017`. |
+| `MONGO_URL` | `str` | `mongodb://localhost:27017` | Строка подключения к MongoDB (локально или Internal URL в Coolify). |
 | `MONGO_DB_NAME` | `str` | `football_bot` | Имя базы данных в MongoDB. |
 | `DEFAULT_TIMEZONE` | `str` | `Europe/Kyiv` | Временная зона по умолчанию для парсинга и отображения дат игр. |
 | `ADMIN_TELEGRAM_IDS`| `str` | `""` | Список Telegram ID администраторов через запятую (например: `"123456789,987654321"`). |
