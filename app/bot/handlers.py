@@ -38,6 +38,12 @@ from app.bot.keyboards import (
     admin_finish_game_keyboard,
     admin_post_finish_keyboard,
 )
+from app.services.activity_notifications import (
+    TERMINAL_ACTIVITY_STATUSES,
+    clear_activity_notifications,
+    find_promoted_participants,
+    notify_roster_activity,
+)
 from app.services.render import format_game_message, format_payments_message
 from app.services.rich_message import (
     send_game_message,
@@ -202,6 +208,8 @@ async def update_game_message(bot, game: dict) -> None:
         for m in messages
     ]
     await asyncio.gather(*tasks, return_exceptions=True)
+    if game.get("status") in TERMINAL_ACTIVITY_STATUSES and game.get("activity_messages"):
+        await clear_activity_notifications(bot, game)
 
 
 async def get_active_game_or_reply(message: Message) -> dict | None:
@@ -1112,6 +1120,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
                                 pass
                     await game_repo.remove_linked_message(game_id, cid)
                     await game_repo.add_linked_message(game_id, cid, sent.message_id, chat_title)
+                    await clear_activity_notifications(callback.bot, fresh, chat_ids=[cid])
                 except (TelegramBadRequest, TelegramForbiddenError):
                     await chat_repo.set_active_status(cid, False)
 
@@ -1190,6 +1199,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
                         pass
             await game_repo.remove_linked_message(game_id, target_chat_id)
             await game_repo.add_linked_message(game_id, target_chat_id, sent.message_id, chat_title)
+            await clear_activity_notifications(callback.bot, fresh, chat_ids=[target_chat_id])
             await callback.answer(f"Переотправлено вниз в {chat_title}")
         except (TelegramBadRequest, TelegramForbiddenError):
             await chat_repo.set_active_status(target_chat_id, False)
@@ -1212,6 +1222,7 @@ async def admin_callback(callback: CallbackQuery, state: FSMContext) -> None:
                     except (TelegramBadRequest, TelegramForbiddenError):
                         pass
         await game_repo.remove_linked_message(game_id, target_chat_id)
+        await clear_activity_notifications(callback.bot, fresh, chat_ids=[target_chat_id])
         await render_broadcast_menu(callback.bot, callback.from_user.id, game_id, callback.message)
         await callback.answer("Удалено из группы")
         return

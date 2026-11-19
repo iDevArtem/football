@@ -101,6 +101,19 @@ class GameRepository:
             {"$set": {"message_id": message_id, "updated_at": datetime.now(timezone.utc)}}
         )
 
+    async def set_activity_message_id(self, game_id: str, chat_id: int, message_id: int) -> None:
+        await self.db.games.update_one(
+            {"_id": ObjectId(game_id)},
+            {"$set": {f"activity_messages.{chat_id}": message_id}},
+        )
+
+    async def clear_activity_message_id(self, game_id: str, chat_id: int | None = None) -> None:
+        unset_fields = {"activity_messages": ""} if chat_id is None else {f"activity_messages.{chat_id}": ""}
+        await self.db.games.update_one(
+            {"_id": ObjectId(game_id)},
+            {"$unset": unset_fields},
+        )
+
     async def get(self, game_id: str) -> dict | None:
         return await self.db.games.find_one({"_id": ObjectId(game_id)})
 

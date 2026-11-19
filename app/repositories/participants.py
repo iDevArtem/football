@@ -37,6 +37,13 @@ class ParticipantRepository:
     async def get(self, participant_id: str) -> dict | None:
         return await self.db.participants.find_one({"_id": ObjectId(participant_id)})
 
+    async def get_player(self, game_id: str, telegram_id: int) -> dict | None:
+        return await self.db.participants.find_one({
+            "game_id": ObjectId(game_id),
+            "telegram_id": telegram_id,
+            "type": "player",
+        })
+
     async def next_position(self, game_id: str) -> int:
         from pymongo import ReturnDocument
         game = await self.db.games.find_one_and_update(
