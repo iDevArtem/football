@@ -16,6 +16,7 @@ from app.repositories.settings import SettingsRepository
 from app.api.dependencies import require_admin
 from app.api.sync import trigger_sync
 from app.bot.bot_instance import get_bot
+from app.services.activity_notifications import clear_activity_notifications
 
 # For patching in tests
 from app.bot.handlers import update_game_message
@@ -549,6 +550,8 @@ async def publish_game(
             chat_title = chat_doc.get("title", f"Чат {chat_id}") if chat_doc else f"Чат {chat_id}"
             await game_repo.remove_linked_message(game_id, chat_id)
             await game_repo.add_linked_message(game_id, chat_id, sent.message_id, chat_title)
+            if game.get("activity_messages"):
+                await clear_activity_notifications(bot, game, chat_ids=[chat_id])
         except Exception:
             pass
 

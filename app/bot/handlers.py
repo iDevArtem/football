@@ -185,6 +185,8 @@ async def update_game_message(bot, game: dict) -> None:
         messages.append({"chat_id": game["chat_id"], "message_id": game["message_id"]})
 
     if not messages:
+        if game.get("status") in TERMINAL_ACTIVITY_STATUSES and game.get("activity_messages"):
+            await clear_activity_notifications(bot, game)
         return
 
     game_repo = GameRepository(db)
@@ -1586,17 +1588,55 @@ async def game_callback(callback: CallbackQuery, state: FSMContext) -> None:
     await user_repo.upsert_from_telegram(callback.from_user, is_admin=is_admin(callback.from_user.id))
 
     if action == "join":
+        existing = await participants_repo.get_player(game_id, callback.from_user.id)
+        was_active = bool(existing and existing.get("status") in ("confirmed", "reserve"))
         participant = await participants_repo.join_player(game, callback.from_user)
         await callback.answer("✅ Ты записан" if participant["status"] == "confirmed" else "🟡 Ты в резерве")
         game = await game_repo.get(game_id)
         await update_game_message(callback.bot, game)
+        if not was_active:
+            actor_name = (
+                participant.get("display_name")
+                or callback.from_user.full_name
+                or callback.from_user.username
+                or str(callback.from_user.id)
+            )
+            await notify_roster_activity(
+                callback.bot,
+                game_id,
+                "join",
+                actor_name=actor_name,
+                result_status=participant.get("status"),
+            )
         return
 
     if action == "decline":
+        before_participants = await participants_repo.list_by_game(game_id)
+        existing = next(
+            (p for p in before_participants if p.get("type") == "player" and p.get("telegram_id") == callback.from_user.id),
+            None,
+        )
+        was_active = bool(existing and existing.get("status") in ("confirmed", "reserve"))
         await participants_repo.decline_player(game_id, callback.from_user)
         await callback.answer("❌ Отметил, что ты не будешь")
         game = await game_repo.get(game_id)
         await update_game_message(callback.bot, game)
+        if was_active:
+            after_participants = await participants_repo.list_by_game(game_id)
+            promoted = find_promoted_participants(before_participants, after_participants)
+            actor_name = (
+                (existing.get("display_name") if existing else None)
+                or callback.from_user.full_name
+                or callback.from_user.username
+                or str(callback.from_user.id)
+            )
+            await notify_roster_activity(
+                callback.bot,
+                game_id,
+                "decline",
+                actor_name=actor_name,
+                promoted_names=[p["display_name"] for p in promoted],
+            )
         return
 
     if action == "add_friend":
@@ -1681,6 +1721,9 @@ async def friend_callback(callback: CallbackQuery) -> None:
         await callback.answer("Отменить друга уже нельзя", show_alert=True)
         return
 
+    before_participants = await participants_repo.list_by_game(game_id)
+    friend_doc = next((p for p in before_participants if str(p["_id"]) == str(friend_id)), None)
+
     ok = await participants_repo.cancel_friend(game_id, friend_id, callback.from_user.id)
     if not ok:
         await callback.answer("Не могу отменить этого друга", show_alert=True)
@@ -1693,6 +1736,17 @@ async def friend_callback(callback: CallbackQuery) -> None:
 
     game = await game_repo.get(game_id)
     await update_game_message(callback.bot, game)
+    after_participants = await participants_repo.list_by_game(game_id)
+    promoted = find_promoted_participants(before_participants, after_participants)
+    actor_name = callback.from_user.full_name or callback.from_user.username or str(callback.from_user.id)
+    await notify_roster_activity(
+        callback.bot,
+        game_id,
+        "cancel_friend",
+        actor_name=actor_name,
+        friend_name=friend_doc.get("display_name") if friend_doc else None,
+        promoted_names=[p["display_name"] for p in promoted],
+    )
     await callback.answer("Друг отменен")
 
 
@@ -1750,6 +1804,15 @@ async def process_friend_name(message: Message, state: FSMContext | None, data: 
     await cleanup_friend_input(message, data)
     game = await GameRepository(db).get(game_id)
     await update_game_message(message.bot, game)
+    actor_name = message.from_user.full_name or message.from_user.username or str(message.from_user.id)
+    await notify_roster_activity(
+        message.bot,
+        game_id,
+        "add_friend",
+        actor_name=actor_name,
+        friend_name=participant.get("display_name") or friend_name,
+        result_status=participant.get("status"),
+    )
     await temporary_reply(message, "✅ Друг добавлен" if participant["status"] == "confirmed" else "🟡 Друг добавлен в резерв")
 
 

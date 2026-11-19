@@ -27,3 +27,24 @@ def trigger_sync(game_id: str) -> None:
         loop.create_task(sync_game_message(game_id))
     except RuntimeError:
         pass
+
+
+async def sync_activity_notification(game_id: str, event: str, **kwargs) -> None:
+    bot = get_bot()
+    if not bot:
+        return
+    try:
+        from app.services.activity_notifications import notify_roster_activity
+        await notify_roster_activity(bot, game_id, event, **kwargs)
+    except Exception as e:
+        logger.exception("Failed to sync activity notification for %s: %s", game_id, e)
+
+
+def trigger_activity_notification(game_id: str, event: str, **kwargs) -> None:
+    if not get_bot():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(sync_activity_notification(game_id, event, **kwargs))
+    except RuntimeError:
+        pass

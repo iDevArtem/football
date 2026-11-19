@@ -1,3 +1,4 @@
+import inspect
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 from typing import Optional
@@ -11,7 +12,11 @@ from app.repositories.payments import PaymentRepository
 from app.repositories.users import UserRepository
 from app.repositories.settings import SettingsRepository
 from app.api.dependencies import get_current_user, get_optional_user
-from app.api.sync import trigger_sync
+from app.api.sync import trigger_sync, trigger_activity_notification
+from app.services.activity_notifications import (
+    find_promoted_participants,
+    get_group_card_entries,
+)
 from app.services.render import dynamic_format_text, status_text
 from app.bot.bot_instance import get_bot
 
@@ -47,6 +52,30 @@ class FriendRequest(BaseModel):
 class PaymentStatusRequest(BaseModel):
     participant_id: Optional[str] = None
     status: str  # "paid" or "not_played"
+
+
+async def _safe_list_participants(part_repo, game_id: str) -> list[dict] | None:
+    list_fn = getattr(part_repo, "list_by_game", None)
+    if not callable(list_fn):
+        return None
+    res = list_fn(game_id)
+    if inspect.isawaitable(res):
+        res = await res
+    return res if isinstance(res, list) else None
+
+
+def _user_display_name(user: dict, fallback_proxy: UserProxy | None = None) -> str:
+    if fallback_proxy and fallback_proxy.full_name:
+        return fallback_proxy.full_name
+    first = (user.get("first_name") or "").strip()
+    last = (user.get("last_name") or "").strip()
+    full = " ".join(part for part in (first, last) if part)
+    if full:
+        return full
+    username = (fallback_proxy.username if fallback_proxy else None) or user.get("username")
+    if username:
+        return str(username)
+    return str(user.get("telegram_id", ""))
 
 
 def serialize_game(game: dict, confirmed_count: int, reserve_count: int = 0) -> dict:
@@ -196,8 +225,27 @@ async def join_game(
         last_name=last_name,
     )
 
+    should_notify = bool(get_bot() and get_group_card_entries(game))
+    was_active = False
+    if should_notify:
+        before_participants = await _safe_list_participants(part_repo, game_id)
+        if before_participants is not None:
+            existing = next(
+                (p for p in before_participants if p.get("type") == "player" and p.get("telegram_id") == user["telegram_id"]),
+                None,
+            )
+            was_active = bool(existing and existing.get("status") in ("confirmed", "reserve"))
+
     participant = await part_repo.join_player(game, tg_user)
     trigger_sync(game_id)
+    if not was_active and should_notify:
+        actor_name = participant.get("display_name") or _user_display_name(user, tg_user)
+        trigger_activity_notification(
+            game_id,
+            "join",
+            actor_name=actor_name,
+            result_status=participant.get("status"),
+        )
 
     return {
         "status": participant["status"],
@@ -238,8 +286,30 @@ async def leave_game(
         last_name=last_name,
     )
 
+    should_notify = bool(get_bot() and get_group_card_entries(game))
+    before_participants = await _safe_list_participants(part_repo, game_id) if should_notify else None
+    existing = None
+    was_active = False
+    if before_participants is not None:
+        existing = next(
+            (p for p in before_participants if p.get("type") == "player" and p.get("telegram_id") == user["telegram_id"]),
+            None,
+        )
+        was_active = bool(existing and existing.get("status") in ("confirmed", "reserve"))
+
     await part_repo.decline_player(game_id, tg_user)
     trigger_sync(game_id)
+
+    if was_active and should_notify:
+        after_participants = await _safe_list_participants(part_repo, game_id) or []
+        promoted = find_promoted_participants(before_participants or [], after_participants)
+        actor_name = (existing.get("display_name") if existing else None) or _user_display_name(user, tg_user)
+        trigger_activity_notification(
+            game_id,
+            "decline",
+            actor_name=actor_name,
+            promoted_names=[p["display_name"] for p in promoted],
+        )
 
     return {"status": "declined"}
 
@@ -283,6 +353,15 @@ async def add_friend(
     if bot and updated_game:
         await update_game_message(bot, updated_game)
     trigger_sync(game_id)
+    target_game = updated_game or game
+    if bot and get_group_card_entries(target_game):
+        trigger_activity_notification(
+            game_id,
+            "add_friend",
+            actor_name=_user_display_name(user),
+            friend_name=friend.get("display_name") or req.friend_name.strip(),
+            result_status=friend.get("status"),
+        )
 
     return serialize_participant(friend)
 
@@ -309,6 +388,14 @@ async def remove_friend(
     if game.get("status") in {"cancelled", "closed", "registration_closed", "game_started", "finished", "payment_collection"}:
         raise HTTPException(status_code=400, detail="Action not permitted in current game status")
 
+    should_notify_pre = bool(get_bot() and get_group_card_entries(game))
+    before_participants = await _safe_list_participants(part_repo, game_id) if should_notify_pre else None
+    friend_doc = (
+        next((p for p in before_participants if str(p["_id"]) == str(participant_id)), None)
+        if before_participants is not None
+        else None
+    )
+
     success = await part_repo.cancel_friend(game_id, participant_id, user["telegram_id"])
     if not success:
         raise HTTPException(status_code=404, detail="Friend participant not found or not owned by user")
@@ -318,6 +405,18 @@ async def remove_friend(
     if bot and updated_game:
         await update_game_message(bot, updated_game)
     trigger_sync(game_id)
+
+    target_game = updated_game or game
+    if bot and get_group_card_entries(target_game):
+        after_participants = await _safe_list_participants(part_repo, game_id) or []
+        promoted = find_promoted_participants(before_participants or [], after_participants)
+        trigger_activity_notification(
+            game_id,
+            "cancel_friend",
+            actor_name=_user_display_name(user),
+            friend_name=friend_doc.get("display_name") if friend_doc else None,
+            promoted_names=[p["display_name"] for p in promoted],
+        )
     return {"status": "removed"}
 
 
